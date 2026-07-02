@@ -1,0 +1,26 @@
+#schema: https://taskfile.dev/schema.json
+version: '3.17'
+
+tasks:
+  run:
+    desc: Run
+    cmds:
+      - go run . {{.CLI_ARGS}}
+
+  lint:
+    desc: Run lint with auto-fix where possible (dev workflow)
+    cmds:
+      - docker run --rm -v "$(pwd):/repo" -w /repo thumbrise/commitlint-scope:latest-alpine run --from main --to HEAD
+      - golangci-lint run --fix
+
+  test:
+    desc: Run tests
+    cmds:
+      - go test ./... -v
+      - go test ./... -v -run=NONE -bench=. -benchmem
+
+  build:
+    desc: Build
+    cmds:
+      - mkdir -p build
+      - go build -o build/ -ldflags="-s -w -X main.version=1.0.0-local -X main.commit=aabbcc -X main.date=2006-01-02T15:04:05Z07:00"
