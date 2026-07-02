@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/vite-env.d.ts","./src/components/debugpanel.tsx","./src/components/editorview.tsx","./src/components/fileexplorer.tsx","./src/components/searchoverlay.tsx","./src/components/statusbar.tsx","./src/hooks/usefilecontent.ts","./src/hooks/usefiletree.ts","./src/types/index.ts"],"version":"5.8.3"}
