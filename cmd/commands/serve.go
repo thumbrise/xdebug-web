@@ -2,16 +2,16 @@ package commands
 
 import (
 	"context"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
 
+	"github.com/thumbrise/xdebug-web/internal"
 	"github.com/urfave/cli/v3"
 )
 
 var (
-	flagServePort    string
+	flagServePort    int
 	flagServeVerbose bool
 )
 
@@ -26,11 +26,11 @@ Examples:
 `,
 	Suggest: true,
 	Flags: []cli.Flag{
-		&cli.StringFlag{
+		&cli.IntFlag{
 			Name:        "port",
 			Usage:       "Port to serve web server on",
 			Required:    false,
-			Value:       "8000",
+			Value:       8080,
 			Destination: &flagServePort,
 		},
 		&cli.BoolFlag{
@@ -44,9 +44,10 @@ Examples:
 
 	Action: func(ctx context.Context, cmd *cli.Command) error {
 		configureLogger(os.Stderr, flagServeVerbose)
-		fmt.Println("Hello World")
 
-		return nil
+		server := internal.NewServer(slog.Default(), flagServePort)
+
+		return server.Serve(ctx)
 	},
 }
 

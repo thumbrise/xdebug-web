@@ -7,6 +7,11 @@ tasks:
     cmds:
       - go run . {{.CLI_ARGS}}
 
+  serve:
+    desc: Serve
+    cmds:
+      - go run . serve --port 8080
+
   lint:
     desc: Run lint with auto-fix where possible (dev workflow)
     cmds:
