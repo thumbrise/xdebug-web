@@ -4,3 +4,4 @@ commitlint-scope
 build/*
 # Added by goreleaser init:
 dist/
+internal/web/dist/

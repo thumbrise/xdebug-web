@@ -24,8 +24,40 @@ tasks:
       - go test ./... -v
       - go test ./... -v -run=NONE -bench=. -benchmem
 
+  frontend:install:
+    desc: Install frontend dependencies
+    dir: frontend
+    cmds:
+      - npm install
+
+  frontend:dev:
+    desc: Start Vite dev server with HMR
+    dir: frontend
+    cmds:
+      - npm run dev
+
+  frontend:build:
+    desc: Build frontend for production
+    dir: frontend
+    cmds:
+      - npm run build
+
+  serve:dev:
+    desc: Run Go server in dev mode (frontend served by Vite)
+    cmds:
+      - go run . serve --port 8080 --dev
+
+  serve:prod:
+    desc: Run Go server in production mode (embedded frontend)
+    deps:
+      - frontend:build
+    cmds:
+      - go run . serve --port 8080
+
   build:
-    desc: Build
+    desc: Build Go binary with embedded frontend
+    deps:
+      - frontend:build
     cmds:
       - mkdir -p build
       - go build -o build/ -ldflags="-s -w -X main.version=1.0.0-local -X main.commit=aabbcc -X main.date=2006-01-02T15:04:05Z07:00"

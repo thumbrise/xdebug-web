@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -11,7 +12,8 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
+	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/thumbrise/xdebug-web/internal/web/handler"
 )
 
 type Server struct {
@@ -23,6 +25,7 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 	return &Server{logger: logger, config: cfg}
 }
 
+//nolint:funlen
 func (s *Server) Serve(ctx context.Context) error {
 	if s.config.Port <= 0 {
 		s.config.Port = 8080
@@ -30,10 +33,23 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("welcome"))
+	r.Use(chimw.Logger)
+	r.Use(chimw.Recoverer)
+
+	r.Route("/api", func(r chi.Router) {
+		r.Get("/health", handler.Health())
+		r.Get("/files", handler.Files(s.config.ProjectDir))
+		r.Get("/file", handler.File(s.config.ProjectDir))
 	})
+
+	if !s.config.DevMode {
+		distFS := DistFS()
+
+		r.Get("/", spaIndex(distFS))
+		r.Get("/index.html", spaIndex(distFS))
+		r.Handle("/assets/*", spaStatic(distFS))
+		r.NotFound(spaFallback(distFS))
+	}
 
 	humacfg := huma.DefaultConfig(s.config.AppName, s.config.Version)
 	humacfg.DocsPath = s.config.DocsPath
@@ -49,7 +65,7 @@ func (s *Server) Serve(ctx context.Context) error {
 
 	go func() {
 		<-ctx.Done()
-		slog.Info("shutting down server")
+		s.logger.Info("shutting down server")
 
 		shutdownCtx, cancel := context.WithTimeout(
 			context.WithoutCancel(ctx),
@@ -60,13 +76,16 @@ func (s *Server) Serve(ctx context.Context) error {
 		err := srv.Shutdown(shutdownCtx)
 
 		if errors.Is(err, context.DeadlineExceeded) {
-			slog.WarnContext(shutdownCtx, "shutdown timed out, some connections were force-closed")
+			s.logger.WarnContext(shutdownCtx, "shutdown timed out, some connections were force-closed")
 		} else if err != nil {
-			slog.ErrorContext(shutdownCtx, "shutdown error", "error", err)
+			s.logger.ErrorContext(shutdownCtx, "shutdown error", "error", err)
 		}
 	}()
 
-	s.logger.InfoContext(ctx, "server started", "port", s.config.Port)
+	s.logger.InfoContext(ctx, "server started",
+		"port", s.config.Port,
+		"dev", s.config.DevMode,
+	)
 
 	err := srv.ListenAndServe()
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -74,4 +93,24 @@ func (s *Server) Serve(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func spaIndex(distFS fs.FS) http.HandlerFunc {
+	data, err := fs.ReadFile(distFS, "index.html")
+	if err != nil {
+		panic("xdebug-web: failed to read embedded index.html: " + err.Error())
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write(data)
+	}
+}
+
+func spaStatic(distFS fs.FS) http.HandlerFunc {
+	return http.FileServer(http.FS(distFS)).ServeHTTP
+}
+
+func spaFallback(distFS fs.FS) http.HandlerFunc {
+	return spaIndex(distFS)
 }
