@@ -2,11 +2,10 @@ package commands
 
 import (
 	"context"
-	"io"
-	"log/slog"
 	"os"
 
-	"github.com/thumbrise/xdebug-web/internal"
+	"github.com/thumbrise/xdebug-web/internal/infra"
+	"github.com/thumbrise/xdebug-web/internal/web"
 	"github.com/urfave/cli/v3"
 )
 
@@ -22,7 +21,7 @@ var ServeCMD = &cli.Command{
 	Description: `Run web server.
 
 Examples:
-  xdebug-web serve --port 8000
+  xdebug-web serve --port 8080
 `,
 	Suggest: true,
 	Flags: []cli.Flag{
@@ -43,28 +42,16 @@ Examples:
 	},
 
 	Action: func(ctx context.Context, cmd *cli.Command) error {
-		configureLogger(os.Stderr, flagServeVerbose)
+		logger := infra.NewLogger(os.Stderr, flagServeVerbose)
 
-		server := internal.NewServer(slog.Default(), flagServePort)
+		cfg := web.Config{
+			AppName:  "Xdebug-web",
+			Port:     flagServePort,
+			Version:  "1.0.0",
+			DocsPath: "/api/docs",
+		}
+		server := web.NewServer(cfg, logger)
 
 		return server.Serve(ctx)
 	},
-}
-
-func configureLogger(writer io.Writer, verbose bool) {
-	opts := &slog.HandlerOptions{
-		AddSource: false,
-		Level:     slog.LevelInfo,
-	}
-
-	if verbose {
-		opts.Level = slog.LevelDebug
-		opts.AddSource = true
-	}
-
-	handler := slog.NewTextHandler(writer, opts)
-
-	logger := slog.New(handler)
-
-	slog.SetDefault(logger)
 }
