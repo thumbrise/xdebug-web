@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,8 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/thumbrise/xdebug-web/internal/session"
+	"github.com/thumbrise/xdebug-web/internal/transport"
 	"github.com/thumbrise/xdebug-web/internal/web/handler"
 )
 
@@ -25,21 +28,62 @@ func NewServer(cfg Config, logger *slog.Logger) *Server {
 	return &Server{logger: logger, config: cfg}
 }
 
-//nolint:funlen
 func (s *Server) Serve(ctx context.Context) error {
 	if s.config.Port <= 0 {
 		s.config.Port = 8080
 		s.logger.WarnContext(ctx, "server port is invalid, set to default")
 	}
 
+	sessionStore := session.NewStore()
+	r := s.setupRouter(sessionStore)
+
+	dbgpListener := session.NewListener(s.dbgpAddr(), sessionStore, s.logger)
+
+	go func() {
+		if err := dbgpListener.Listen(ctx); err != nil && ctx.Err() == nil {
+			s.logger.ErrorContext(ctx, "dbgp listener", "error", err)
+		}
+	}()
+
+	srv := s.createHTTPServer(r)
+	s.startGracefulShutdown(ctx, srv)
+
+	s.logger.InfoContext(ctx, "server started",
+		"port", s.config.Port,
+		"dev", s.config.DevMode,
+		"dbgp", dbgpListener.Addr(),
+	)
+
+	err := srv.ListenAndServe()
+	if err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+
+	return nil
+}
+
+func (s *Server) dbgpAddr() string {
+	if s.config.DbgpAddr != "" {
+		return s.config.DbgpAddr
+	}
+
+	return fmt.Sprintf(":%d", s.config.DbgpPort)
+}
+
+func (s *Server) setupRouter(sessionStore *session.Store) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(chimw.Logger)
 	r.Use(chimw.Recoverer)
 
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", handler.Health())
-		r.Get("/files", handler.Files(s.config.ProjectDir))
-		r.Get("/file", handler.File(s.config.ProjectDir))
+
+		if s.config.ProjectDir != "" {
+			r.Get("/files", handler.Files(s.config.ProjectDir))
+			r.Get("/file", handler.File(s.config.ProjectDir))
+		}
+
+		r.Get("/debug", transport.NewHandler(sessionStore, s.logger).ServeHTTP)
 	})
 
 	if !s.config.DevMode {
@@ -55,14 +99,20 @@ func (s *Server) Serve(ctx context.Context) error {
 	humacfg.DocsPath = s.config.DocsPath
 	_ = humachi.New(r, humacfg)
 
-	srv := http.Server{
+	return r
+}
+
+func (s *Server) createHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
 		Addr:              ":" + strconv.Itoa(s.config.Port),
-		Handler:           r,
+		Handler:           handler,
 		ReadTimeout:       10 * time.Second,
 		ReadHeaderTimeout: 3 * time.Second,
 		WriteTimeout:      10 * time.Second,
 	}
+}
 
+func (s *Server) startGracefulShutdown(ctx context.Context, srv *http.Server) {
 	go func() {
 		<-ctx.Done()
 		s.logger.Info("shutting down server")
@@ -81,18 +131,6 @@ func (s *Server) Serve(ctx context.Context) error {
 			s.logger.ErrorContext(shutdownCtx, "shutdown error", "error", err)
 		}
 	}()
-
-	s.logger.InfoContext(ctx, "server started",
-		"port", s.config.Port,
-		"dev", s.config.DevMode,
-	)
-
-	err := srv.ListenAndServe()
-	if err != nil && !errors.Is(err, http.ErrServerClosed) {
-		return err
-	}
-
-	return nil
 }
 
 func spaIndex(distFS fs.FS) http.HandlerFunc {

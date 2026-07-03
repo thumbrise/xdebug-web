@@ -1,0 +1,86 @@
+package session
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"net"
+	"sync"
+
+	"github.com/thumbrise/xdebug-web/internal/dbgp"
+)
+
+type Listener struct {
+	addr    string
+	store   *Store
+	logger  *slog.Logger
+	mu      sync.Mutex
+	running bool
+}
+
+func NewListener(addr string, store *Store, logger *slog.Logger) *Listener {
+	return &Listener{
+		addr:   addr,
+		store:  store,
+		logger: logger.With("subsystem", "listener"),
+	}
+}
+
+func (l *Listener) Addr() string {
+	return l.addr
+}
+
+func (l *Listener) Listen(ctx context.Context) error {
+	lc := net.ListenConfig{}
+
+	listener, err := lc.Listen(ctx, "tcp", l.addr)
+	if err != nil {
+		return fmt.Errorf("listen tcp %s: %w", l.addr, err)
+	}
+
+	l.mu.Lock()
+	l.running = true
+	l.mu.Unlock()
+
+	l.logger.InfoContext(ctx, "listening for xdebug connections", "addr", l.addr)
+
+	go func() {
+		<-ctx.Done()
+
+		_ = listener.Close()
+	}()
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
+			l.logger.WarnContext(ctx, "accept", "error", err)
+
+			continue
+		}
+
+		l.logger.InfoContext(ctx, "xdebug connected", "remote", conn.RemoteAddr())
+
+		dbgpConn := dbgp.NewConn(conn)
+		sess := NewSession(dbgpConn, l.logger)
+
+		l.store.Add(sess)
+
+		go func() {
+			defer func() {
+				l.store.Remove(sess)
+
+				_ = dbgpConn.Close()
+
+				l.logger.InfoContext(ctx, "xdebug disconnected", "remote", conn.RemoteAddr())
+			}()
+
+			if err := sess.Run(ctx); err != nil && ctx.Err() == nil {
+				l.logger.WarnContext(ctx, "session", "error", err)
+			}
+		}()
+	}
+}

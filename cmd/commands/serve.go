@@ -15,6 +15,8 @@ var (
 	flagServeVerbose    bool
 	flagServeDev        bool
 	flagServeProjectDir string
+	flagServeDbgpPort   int
+	flagServeDbgpAddr   string
 )
 
 func projectDirOrDefault(dir string) string {
@@ -66,6 +68,19 @@ Examples:
 			Required:    false,
 			Destination: &flagServeProjectDir,
 		},
+		&cli.IntFlag{
+			Name:        "dbgp-port",
+			Usage:       "Port for the DBGp (Xdebug) listener",
+			Required:    false,
+			Value:       9003,
+			Destination: &flagServeDbgpPort,
+		},
+		&cli.StringFlag{
+			Name:        "dbgp-addr",
+			Usage:       "Address for the DBGp (Xdebug) listener (overrides --dbgp-port)",
+			Required:    false,
+			Destination: &flagServeDbgpAddr,
+		},
 	},
 
 	Action: func(ctx context.Context, cmd *cli.Command) error {
@@ -78,6 +93,8 @@ Examples:
 			DocsPath:   "/api/docs",
 			DevMode:    flagServeDev,
 			ProjectDir: filepath.Clean(projectDirOrDefault(flagServeProjectDir)),
+			DbgpPort:   flagServeDbgpPort,
+			DbgpAddr:   flagServeDbgpAddr,
 		}
 
 		logger.InfoContext(ctx, "project directory", "path", cfg.ProjectDir)
