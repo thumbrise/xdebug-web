@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/thumbrise/xdebug-web/internal/dbgp"
+	"github.com/thumbrise/xdebug-web/internal/pathmap"
 )
 
 const maxMsgBuf = 64
@@ -14,23 +15,25 @@ const maxMsgBuf = 64
 var ErrUnknownCmdType = errors.New("unknown command type")
 
 type Session struct {
-	conn   *dbgp.Conn
-	state  *State
-	cmds   chan dbgp.Command
-	subs   []chan *State
-	done   chan struct{}
-	txID   int
-	logger *slog.Logger
+	conn       *dbgp.Conn
+	state      *State
+	cmds       chan dbgp.Command
+	subs       []chan *State
+	done       chan struct{}
+	txID       int
+	logger     *slog.Logger
+	remoteRoot string
 }
 
-func NewSession(conn *dbgp.Conn, logger *slog.Logger) *Session {
+func NewSession(conn *dbgp.Conn, logger *slog.Logger, remoteRoot string) *Session {
 	return &Session{
-		conn:   conn,
-		logger: logger.With("subsystem", "session"),
-		state:  NewState(),
-		txID:   0,
-		cmds:   make(chan dbgp.Command, maxMsgBuf),
-		done:   make(chan struct{}),
+		conn:       conn,
+		logger:     logger.With("subsystem", "session"),
+		state:      NewState(),
+		txID:       0,
+		cmds:       make(chan dbgp.Command, maxMsgBuf),
+		done:       make(chan struct{}),
+		remoteRoot: remoteRoot,
 	}
 }
 
@@ -45,12 +48,15 @@ func (s *Session) Run(ctx context.Context) error {
 		return fmt.Errorf("parse init: %w", err)
 	}
 
-	s.state.SetInit(initInfo)
+	relativePath := pathmap.ToRelative(initInfo.FileURI, s.remoteRoot)
+
+	s.state.SetInit(initInfo, relativePath)
 	s.broadcast()
 
 	s.logger.InfoContext(ctx, "xdebug connected",
 		"language", initInfo.Language,
 		"file", initInfo.FileURI,
+		"relative", relativePath,
 		"ideKey", initInfo.IdeKey,
 	)
 
@@ -79,7 +85,7 @@ func (s *Session) processBreak(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("initial step: %w", err)
 	}
 
-	s.state.SetStepStatus(result.Status, result.Filename, result.Lineno)
+	s.state.SetStepStatus(result.Status, s.toRelative(result.Filename), result.Lineno)
 
 	switch result.Status {
 	case dbgp.StatusBreak:
@@ -140,6 +146,8 @@ func (s *Session) handleBreak(ctx context.Context) error {
 }
 
 func (s *Session) afterCommand(ctx context.Context, result *dbgp.StepResult) bool {
+	s.state.SetStepStatus(result.Status, s.toRelative(result.Filename), result.Lineno)
+
 	switch result.Status {
 	case dbgp.StatusBreak:
 		if err := s.refreshStack(ctx); err != nil {
@@ -159,7 +167,6 @@ func (s *Session) afterCommand(ctx context.Context, result *dbgp.StepResult) boo
 		return true
 
 	case dbgp.StatusRunning:
-		s.state.SetRunning()
 		s.broadcast()
 
 	case dbgp.StatusStarting:
@@ -220,6 +227,10 @@ func (s *Session) refreshStack(ctx context.Context) error {
 		return err
 	}
 
+	for i := range frames {
+		frames[i].Filename = s.toRelative(frames[i].Filename)
+	}
+
 	s.state.UpdateStack(frames)
 
 	return nil
@@ -275,6 +286,10 @@ func (s *Session) Done() <-chan struct{} {
 
 func (s *Session) State() *State {
 	return s.state.Snapshot()
+}
+
+func (s *Session) toRelative(uri string) string {
+	return pathmap.ToRelative(uri, s.remoteRoot)
 }
 
 func (s *Session) broadcast() {

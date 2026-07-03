@@ -6,7 +6,8 @@ type Config struct {
 	Version    string
 	DocsPath   string
 	DevMode    bool
-	ProjectDir string
+	Root       string
+	RootRemote string
 	DbgpPort   int
 	DbgpAddr   string
 }

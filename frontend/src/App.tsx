@@ -6,14 +6,14 @@ import { StatusBar } from './components/StatusBar'
 import { SearchOverlay } from './components/SearchOverlay'
 import { useFileTree } from './hooks/useFileTree'
 import { useFileContent } from './hooks/useFileContent'
-import type { DebugState } from './types'
+import { useDebugger } from './hooks/useDebugger'
 
 export default function App() {
   const { tree, loading, error } = useFileTree()
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const { content, loading: fileLoading, error: fileError } = useFileContent(selectedPath)
   const [searchOpen, setSearchOpen] = useState(false)
-  const [debugState] = useState<DebugState | null>(null)
+  const { state: debugState, connected, status, send } = useDebugger()
 
   const handleSelectFile = useCallback((path: string) => {
     setSelectedPath(path)
@@ -62,11 +62,11 @@ export default function App() {
         </main>
       </div>
 
-      <DebugPanel state={debugState} />
+      <DebugPanel state={debugState} onSend={send} />
 
       <StatusBar
-        connected={false}
-        debugStatus="idle"
+        connected={connected}
+        debugStatus={status}
       />
 
       {searchOpen && tree && (

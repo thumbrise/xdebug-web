@@ -1,3 +1,10 @@
+export interface InitInfo {
+  language: string
+  fileUri: string
+  appId: string
+  ideKey: string
+}
+
 export interface FileEntry {
   name: string
   type: 'file' | 'directory'
@@ -12,26 +19,38 @@ export interface FileTree {
 
 export interface StackFrame {
   level: number
-  function: string
   filename: string
   lineno: number
+  where: string
 }
 
 export interface DebugVariable {
   name: string
   value: string
   type: string
+  className?: string
+  numChildren: number
   children?: DebugVariable[]
 }
 
-export type DebugStatus = 'idle' | 'running' | 'break' | 'stopped'
+export type DebugStatus = 'idle' | 'starting' | 'running' | 'break' | 'stopped'
 
 export interface DebugState {
   status: DebugStatus
+  initInfo?: InitInfo
+  currentFile: string
+  currentLine: number
   stack: StackFrame[]
   locals: DebugVariable[]
   globals: DebugVariable[]
-  superglobals: DebugVariable[]
-  currentFile: string
-  currentLine: number
+}
+
+export interface OutgoingMessage {
+  type: string
+  data?: DebugState
+}
+
+export interface IncomingCommand {
+  type: string
+  args?: Record<string, string>
 }

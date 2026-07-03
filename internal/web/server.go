@@ -37,7 +37,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	sessionStore := session.NewStore()
 	r := s.setupRouter(sessionStore)
 
-	dbgpListener := session.NewListener(s.dbgpAddr(), sessionStore, s.logger)
+	dbgpListener := session.NewListener(s.dbgpAddr(), sessionStore, s.logger, s.config.RootRemote)
 
 	go func() {
 		if err := dbgpListener.Listen(ctx); err != nil && ctx.Err() == nil {
@@ -78,9 +78,9 @@ func (s *Server) setupRouter(sessionStore *session.Store) *chi.Mux {
 	r.Route("/api", func(r chi.Router) {
 		r.Get("/health", handler.Health())
 
-		if s.config.ProjectDir != "" {
-			r.Get("/files", handler.Files(s.config.ProjectDir))
-			r.Get("/file", handler.File(s.config.ProjectDir))
+		if s.config.Root != "" {
+			r.Get("/files", handler.Files(s.config.Root))
+			r.Get("/file", handler.File(s.config.Root))
 		}
 
 		r.Get("/debug", transport.NewHandler(sessionStore, s.logger).ServeHTTP)

@@ -11,18 +11,20 @@ import (
 )
 
 type Listener struct {
-	addr    string
-	store   *Store
-	logger  *slog.Logger
-	mu      sync.Mutex
-	running bool
+	addr       string
+	store      *Store
+	logger     *slog.Logger
+	mu         sync.Mutex
+	running    bool
+	remoteRoot string
 }
 
-func NewListener(addr string, store *Store, logger *slog.Logger) *Listener {
+func NewListener(addr string, store *Store, logger *slog.Logger, remoteRoot string) *Listener {
 	return &Listener{
-		addr:   addr,
-		store:  store,
-		logger: logger.With("subsystem", "listener"),
+		addr:       addr,
+		store:      store,
+		logger:     logger.With("subsystem", "listener"),
+		remoteRoot: remoteRoot,
 	}
 }
 
@@ -65,7 +67,7 @@ func (l *Listener) Listen(ctx context.Context) error {
 		l.logger.InfoContext(ctx, "xdebug connected", "remote", conn.RemoteAddr())
 
 		dbgpConn := dbgp.NewConn(conn)
-		sess := NewSession(dbgpConn, l.logger)
+		sess := NewSession(dbgpConn, l.logger, l.remoteRoot)
 
 		l.store.Add(sess)
 

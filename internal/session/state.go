@@ -21,12 +21,12 @@ func NewState() *State {
 	return &State{Status: dbgp.StatusStarting}
 }
 
-func (s *State) SetInit(info *dbgp.InitInfo) {
+func (s *State) SetInit(info *dbgp.InitInfo, relativePath string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.InitInfo = info
-	s.CurrentFile = info.FileURI
+	s.CurrentFile = relativePath
 }
 
 func (s *State) SetStepStatus(status dbgp.Status, filename string, lineno int) {

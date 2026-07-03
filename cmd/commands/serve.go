@@ -14,12 +14,13 @@ var (
 	flagServePort       int
 	flagServeVerbose    bool
 	flagServeDev        bool
-	flagServeProjectDir string
+	flagServeRoot       string
+	flagServeRootRemote string
 	flagServeDbgpPort   int
 	flagServeDbgpAddr   string
 )
 
-func projectDirOrDefault(dir string) string {
+func rootOrDefault(dir string) string {
 	if dir != "" {
 		return dir
 	}
@@ -38,7 +39,8 @@ var ServeCMD = &cli.Command{
 Examples:
   xdebug-web serve --port 8080
   xdebug-web serve --dev --port 8080
-  xdebug-web serve --project-dir /var/www/html
+  xdebug-web serve --root /var/www/html
+  xdebug-web serve --root /Users/user/project --root-remote /var/www/html
 `,
 	Suggest: true,
 	Flags: []cli.Flag{
@@ -63,10 +65,16 @@ Examples:
 			Destination: &flagServeDev,
 		},
 		&cli.StringFlag{
-			Name:        "project-dir",
-			Usage:       "Path to the PHP project root",
+			Name:        "root",
+			Usage:       "Path to the PHP project root on the host filesystem",
 			Required:    false,
-			Destination: &flagServeProjectDir,
+			Destination: &flagServeRoot,
+		},
+		&cli.StringFlag{
+			Name:        "root-remote",
+			Usage:       "Remote root path in Xdebug file:// URIs (e.g. /var/www/html). Empty if not using Docker path mapping",
+			Required:    false,
+			Destination: &flagServeRootRemote,
 		},
 		&cli.IntFlag{
 			Name:        "dbgp-port",
@@ -92,12 +100,13 @@ Examples:
 			Version:    "1.0.0",
 			DocsPath:   "/api/docs",
 			DevMode:    flagServeDev,
-			ProjectDir: filepath.Clean(projectDirOrDefault(flagServeProjectDir)),
+			Root:       filepath.Clean(rootOrDefault(flagServeRoot)),
+			RootRemote: flagServeRootRemote,
 			DbgpPort:   flagServeDbgpPort,
 			DbgpAddr:   flagServeDbgpAddr,
 		}
 
-		logger.InfoContext(ctx, "project directory", "path", cfg.ProjectDir)
+		logger.InfoContext(ctx, "root directory", "path", cfg.Root, "remoteRoot", cfg.RootRemote)
 
 		server := web.NewServer(cfg, logger)
 

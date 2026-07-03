@@ -2,6 +2,7 @@ import type { DebugState } from '../types'
 
 interface DebugPanelProps {
   state: DebugState | null
+  onSend: (cmd: string) => void
 }
 
 function StackTrace({ frames }: { frames: DebugState['stack'] }) {
@@ -13,7 +14,7 @@ function StackTrace({ frames }: { frames: DebugState['stack'] }) {
     <div className="debug-stack">
       {frames.map((frame) => (
         <div key={frame.level} className="debug-stack-frame">
-          <span className="debug-stack-fn">{frame.function}</span>
+          <span className="debug-stack-fn">{frame.where}</span>
           <span className="debug-stack-file">
             {frame.filename}:{frame.lineno}
           </span>
@@ -43,7 +44,7 @@ function VariableList({ name, variables }: { name: string; variables: DebugState
   )
 }
 
-export function DebugPanel({ state }: DebugPanelProps) {
+export function DebugPanel({ state, onSend }: DebugPanelProps) {
   if (!state) {
     return (
       <div className="debug-panel">
@@ -52,22 +53,44 @@ export function DebugPanel({ state }: DebugPanelProps) {
     )
   }
 
+  const isBreak = state.status === 'break'
+
   return (
     <div className="debug-panel">
       <div className="debug-controls">
-        <button className="debug-btn" title="Continue (F5)" disabled={state.status !== 'break'}>
+        <button
+          className="debug-btn"
+          title="Continue (F5)"
+          disabled={!isBreak}
+          onClick={() => onSend('run')}
+        >
           ▶ Continue
         </button>
-        <button className="debug-btn" title="Step Over (F10)" disabled={state.status !== 'break'}>
+        <button
+          className="debug-btn"
+          title="Step Over (F10)"
+          disabled={!isBreak}
+          onClick={() => onSend('step_over')}
+        >
           ↘ Step Over
         </button>
-        <button className="debug-btn" title="Step Into (F11)" disabled={state.status !== 'break'}>
+        <button
+          className="debug-btn"
+          title="Step Into (F11)"
+          disabled={!isBreak}
+          onClick={() => onSend('step_into')}
+        >
           ↓ Step Into
         </button>
-        <button className="debug-btn" title="Step Out (⇧F11)" disabled={state.status !== 'break'}>
+        <button
+          className="debug-btn"
+          title="Step Out (⇧F11)"
+          disabled={!isBreak}
+          onClick={() => onSend('step_out')}
+        >
           ↑ Step Out
         </button>
-        <button className="debug-btn debug-btn-stop" title="Stop">
+        <button className="debug-btn debug-btn-stop" title="Stop" onClick={() => onSend('stop')}>
           ■ Stop
         </button>
       </div>
