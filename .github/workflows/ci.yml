@@ -86,6 +86,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: '~/.npm'
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install global npm dependencies
+        run: npm ci
+
+      - name: Install frontend npm dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build Frontend
+        working-directory: frontend
+        run: npm run build
+
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
