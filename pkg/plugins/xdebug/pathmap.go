@@ -1,8 +1,8 @@
-package pathmap
+package xdebug
 
 import "strings"
 
-func ToRelative(uri, remoteRoot string) string {
+func toRelative(uri, remoteRoot string) string {
 	path := strings.TrimPrefix(uri, "file://")
 
 	if remoteRoot == "" {
@@ -12,7 +12,7 @@ func ToRelative(uri, remoteRoot string) string {
 	return strings.TrimPrefix(path, remoteRoot+"/")
 }
 
-func ToURI(relativePath, root, remoteRoot string) string {
+func toURI(relativePath, root, remoteRoot string) string {
 	if strings.HasPrefix(relativePath, "/") {
 		return "file://" + relativePath
 	}

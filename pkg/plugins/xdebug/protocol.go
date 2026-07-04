@@ -1,4 +1,4 @@
-package dbgp
+package xdebug
 
 import (
 	"encoding/base64"
@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+
+	"github.com/thumbrise/xdebug-web/pkg/plugins"
 )
 
 var isoRegexp = regexp.MustCompile(`encoding="iso-8859-1"`)
@@ -23,7 +25,14 @@ type initPacket struct {
 	IdeKey   string   `xml:"idekey,attr"`
 }
 
-func ParseInit(data []byte) (*InitInfo, error) {
+type initInfo struct {
+	Language string
+	FileURI  string
+	AppID    string
+	IdeKey   string
+}
+
+func parseInit(data []byte) (*initInfo, error) {
 	data = fixEncoding(data)
 
 	var p initPacket
@@ -31,7 +40,7 @@ func ParseInit(data []byte) (*InitInfo, error) {
 		return nil, fmt.Errorf("parse init: %w", err)
 	}
 
-	return &InitInfo{
+	return &initInfo{
 		Language: p.Language,
 		FileURI:  p.FileURI,
 		AppID:    p.AppID,
@@ -50,7 +59,14 @@ type stepResponse struct {
 	} `xml:"https://xdebug.org/dbgp/xdebug message"`
 }
 
-func ParseStepResponse(data []byte) (*StepResult, error) {
+type stepResult struct {
+	Status   plugins.Status
+	Filename string
+	Lineno   int
+	Reason   string
+}
+
+func parseStepResponse(data []byte) (*stepResult, error) {
 	data = fixEncoding(data)
 
 	var resp stepResponse
@@ -58,8 +74,8 @@ func ParseStepResponse(data []byte) (*StepResult, error) {
 		return nil, fmt.Errorf("parse step response: %w", err)
 	}
 
-	result := &StepResult{
-		Status: Status(resp.Status),
+	result := &stepResult{
+		Status: plugins.Status(resp.Status),
 		Reason: resp.Reason,
 	}
 
@@ -76,7 +92,7 @@ type breakpointSetResponse struct {
 	ID      string   `xml:"id,attr"`
 }
 
-func ParseBreakpointSetResponse(data []byte) (string, error) {
+func parseBreakpointSetResponse(data []byte) (string, error) {
 	data = fixEncoding(data)
 
 	var resp breakpointSetResponse
@@ -85,7 +101,7 @@ func ParseBreakpointSetResponse(data []byte) (string, error) {
 	}
 
 	if resp.ID == "" {
-		return "", ErrMissingBreakpointID
+		return "", plugins.ErrMissingBreakpointID
 	}
 
 	return resp.ID, nil
@@ -105,7 +121,7 @@ type contextProperty struct {
 	Value       string `xml:",chardata"`
 }
 
-func ParseContextGetResponse(data []byte) ([]Variable, error) {
+func parseContextGetResponse(data []byte) ([]plugins.Variable, error) {
 	data = fixEncoding(data)
 
 	var resp contextGetResponse
@@ -113,10 +129,10 @@ func ParseContextGetResponse(data []byte) ([]Variable, error) {
 		return nil, fmt.Errorf("parse context_get: %w", err)
 	}
 
-	vars := make([]Variable, 0, len(resp.Properties))
+	vars := make([]plugins.Variable, 0, len(resp.Properties))
 
 	for _, p := range resp.Properties {
-		v := Variable{Name: p.Name, Type: p.Type}
+		v := plugins.Variable{Name: p.Name, Type: p.Type}
 		v.Value = decodeValue(p.Value, p.Encoding, p.Type)
 
 		if p.NumChildren > 0 {
@@ -135,7 +151,7 @@ type propertyGetResponse struct {
 	Properties []contextProperty `xml:"property"`
 }
 
-func ParsePropertyGetResponse(data []byte) ([]Variable, error) {
+func parsePropertyGetResponse(data []byte) ([]plugins.Variable, error) {
 	data = fixEncoding(data)
 
 	var resp propertyGetResponse
@@ -143,10 +159,10 @@ func ParsePropertyGetResponse(data []byte) ([]Variable, error) {
 		return nil, fmt.Errorf("parse property_get: %w", err)
 	}
 
-	vars := make([]Variable, 0, len(resp.Properties))
+	vars := make([]plugins.Variable, 0, len(resp.Properties))
 
 	for _, p := range resp.Properties {
-		v := Variable{Name: p.Name, Type: p.Type}
+		v := plugins.Variable{Name: p.Name, Type: p.Type}
 		v.Value = decodeValue(p.Value, p.Encoding, p.Type)
 
 		if p.NumChildren > 0 {
@@ -172,7 +188,7 @@ type stackFrame struct {
 	Where    string `xml:"where,attr"`
 }
 
-func ParseStackGetResponse(data []byte) ([]Frame, error) {
+func parseStackGetResponse(data []byte) ([]plugins.Frame, error) {
 	data = fixEncoding(data)
 
 	var resp stackGetResponse
@@ -180,15 +196,15 @@ func ParseStackGetResponse(data []byte) ([]Frame, error) {
 		return nil, fmt.Errorf("parse stack_get: %w", err)
 	}
 
-	frames := make([]Frame, len(resp.Frames))
+	frames := make([]plugins.Frame, len(resp.Frames))
 	for i, f := range resp.Frames {
-		frames[i] = Frame(f)
+		frames[i] = plugins.Frame(f)
 	}
 
 	return frames, nil
 }
 
-func FormatCommand(cmd string, txID int, args map[string]string) string {
+func formatCommand(cmd string, txID int, args map[string]string) string {
 	var b strings.Builder
 
 	b.WriteString(cmd)
@@ -207,23 +223,23 @@ func FormatCommand(cmd string, txID int, args map[string]string) string {
 	return b.String()
 }
 
-func FormatBreakpointSetCmd(txID int, fileURI string, line int) string {
+func formatBreakpointSetCmd(txID int, fileURI string, line int) string {
 	return fmt.Sprintf("breakpoint_set -i %d -t line -f %s -n %d\x00", txID, fileURI, line)
 }
 
-func FormatBreakpointRemoveCmd(txID int, bpID string) string {
+func formatBreakpointRemoveCmd(txID int, bpID string) string {
 	return fmt.Sprintf("breakpoint_remove -i %d -d %s\x00", txID, bpID)
 }
 
-func FormatContextGetCmd(txID int, depth int) string {
+func formatContextGetCmd(txID int, depth int) string {
 	return fmt.Sprintf("context_get -i %d -d %d\x00", txID, depth)
 }
 
-func FormatStackGetCmd(txID int) string {
+func formatStackGetCmd(txID int) string {
 	return fmt.Sprintf("stack_get -i %d\x00", txID)
 }
 
-func FormatPropertyGetCmd(txID int, depth int, name string) string {
+func formatPropertyGetCmd(txID int, depth int, name string) string {
 	return fmt.Sprintf("property_get -i %d -d %d -n %s\x00", txID, depth, url.QueryEscape(name))
 }
 

@@ -8,8 +8,8 @@ import (
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"github.com/thumbrise/xdebug-web/internal/dbgp"
 	"github.com/thumbrise/xdebug-web/internal/session"
+	"github.com/thumbrise/xdebug-web/pkg/plugins"
 )
 
 var upgrader = websocket.Upgrader{
@@ -66,7 +66,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.writeLoop(ctx, conn, done, sub)
 }
 
-func (h *Handler) writeLoop(ctx context.Context, conn *websocket.Conn, done chan struct{}, sub chan *session.State) {
+func (h *Handler) writeLoop(ctx context.Context, conn *websocket.Conn, done chan struct{}, sub chan *plugins.State) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -81,8 +81,9 @@ func (h *Handler) writeLoop(ctx context.Context, conn *websocket.Conn, done chan
 			}
 
 			msg := OutgoingMessage{
-				Type: "state",
-				Data: state,
+				Type:   "state",
+				Data:   state,
+				Source: h.store.Active().ID(),
 			}
 
 			data, err := json.Marshal(msg)
@@ -115,21 +116,21 @@ func (h *Handler) readLoop(_ context.Context, conn *websocket.Conn, done chan st
 			continue
 		}
 
-		active := h.store.Active()
-		if active == nil {
+		sess := h.store.Active()
+		if sess == nil {
 			continue
 		}
 
-		dbgpCmd, err := toDBGpCommand(cmd)
+		pluginCmd, err := toPluginCommand(cmd)
 		if err != nil {
 			continue
 		}
 
-		active.SendCommand(dbgpCmd)
+		sess.SendCommand(pluginCmd)
 	}
 }
 
-func (h *Handler) subscribeToSession(_ context.Context) chan *session.State {
+func (h *Handler) subscribeToSession(_ context.Context) chan *plugins.State {
 	active := h.store.Active()
 	if active == nil {
 		return nil
@@ -138,27 +139,27 @@ func (h *Handler) subscribeToSession(_ context.Context) chan *session.State {
 	return active.Subscribe()
 }
 
-func toDBGpCommand(cmd IncomingCommand) (dbgp.Command, error) {
-	var cmdType dbgp.CommandType
+func toPluginCommand(cmd IncomingCommand) (plugins.Command, error) {
+	var cmdType plugins.CommandType
 
 	switch cmd.Type {
 	case "step_into":
-		cmdType = dbgp.CmdStepInto
+		cmdType = plugins.CmdStepInto
 	case "step_over":
-		cmdType = dbgp.CmdStepOver
+		cmdType = plugins.CmdStepOver
 	case "step_out":
-		cmdType = dbgp.CmdStepOut
+		cmdType = plugins.CmdStepOut
 	case "run":
-		cmdType = dbgp.CmdRun
+		cmdType = plugins.CmdRun
 	case "stop":
-		cmdType = dbgp.CmdStop
+		cmdType = plugins.CmdStop
 	case "breakpoint_set":
-		cmdType = dbgp.CmdBreakpointSet
+		cmdType = plugins.CmdBreakpointSet
 	case "breakpoint_remove":
-		cmdType = dbgp.CmdBreakpointRemove
+		cmdType = plugins.CmdBreakpointRemove
 	default:
-		return dbgp.Command{}, dbgp.ErrUnknownCommand
+		return plugins.Command{}, plugins.ErrUnknownCommand
 	}
 
-	return dbgp.Command{Type: cmdType, Args: cmd.Args}, nil
+	return plugins.Command{Type: cmdType, Args: cmd.Args}, nil
 }

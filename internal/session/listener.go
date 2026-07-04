@@ -7,7 +7,7 @@ import (
 	"net"
 	"sync"
 
-	"github.com/thumbrise/xdebug-web/internal/dbgp"
+	xdebug "github.com/thumbrise/xdebug-web/pkg/plugins/xdebug"
 )
 
 type Listener struct {
@@ -54,6 +54,8 @@ func (l *Listener) Listen(ctx context.Context) error {
 		_ = listener.Close()
 	}()
 
+	var sessID int
+
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -68,17 +70,16 @@ func (l *Listener) Listen(ctx context.Context) error {
 
 		l.logger.InfoContext(ctx, "xdebug connected", "remote", conn.RemoteAddr())
 
-		dbgpConn := dbgp.NewConn(conn)
-		sess := NewSession(dbgpConn, l.logger, l.remoteRoot, l.root)
+		sessID++
+		dbg := xdebug.NewDebugger(xdebug.NewConn(conn), l.logger, l.root, l.remoteRoot)
+		sess := NewSession(fmt.Sprintf("xdebug-%d", sessID), dbg)
 
 		l.store.Add(sess)
 
 		go func() {
 			defer func() {
 				l.store.Remove(sess)
-
-				_ = dbgpConn.Close()
-
+				dbg.Close()
 				l.logger.InfoContext(ctx, "xdebug disconnected", "remote", conn.RemoteAddr())
 			}()
 
