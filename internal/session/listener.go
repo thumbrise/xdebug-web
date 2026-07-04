@@ -83,6 +83,8 @@ func (l *Listener) Listen(ctx context.Context) error {
 				l.logger.InfoContext(ctx, "xdebug disconnected", "remote", conn.RemoteAddr())
 			}()
 
+			l.store.SyncBreakpoints(sess)
+
 			if err := sess.Run(ctx); err != nil && ctx.Err() == nil {
 				l.logger.WarnContext(ctx, "session", "error", err)
 			}

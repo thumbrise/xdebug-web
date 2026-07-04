@@ -64,7 +64,7 @@ type State struct {
 	CurrentLine  int          `json:"currentLine"`
 	Stack        []Frame      `json:"stack"`
 	Locals       []Variable   `json:"locals"`
-	Globals      []Variable   `json:"globals,omitempty"`
+	Globals      []Variable   `json:"globals"`
 	Breakpoints  []Breakpoint `json:"breakpoints"`
 	Capabilities Capabilities `json:"capabilities"`
 }

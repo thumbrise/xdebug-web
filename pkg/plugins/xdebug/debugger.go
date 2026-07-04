@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 
 	"github.com/thumbrise/xdebug-web/pkg/plugins"
 )
@@ -26,7 +27,12 @@ type state struct {
 }
 
 func newState() *state {
-	return &state{status: plugins.StatusStarting}
+	return &state{
+		status:      plugins.StatusStarting,
+		stack:       make([]plugins.Frame, 0),
+		locals:      make([]plugins.Variable, 0),
+		breakpoints: make([]plugins.Breakpoint, 0),
+	}
 }
 
 type Debugger struct {
@@ -81,6 +87,7 @@ func (d *Debugger) emit() {
 		CurrentLine:  d.internal.currentLine,
 		Stack:        d.internal.stack,
 		Locals:       d.internal.locals,
+		Globals:      make([]plugins.Variable, 0),
 		Breakpoints:  d.internal.breakpoints,
 		Capabilities: plugins.Capabilities{HasStack: true, HasLocals: true},
 	}
@@ -92,6 +99,8 @@ func (d *Debugger) emit() {
 }
 
 func (d *Debugger) Run(ctx context.Context) error {
+	defer close(d.stateCh)
+
 	initData, err := d.conn.ReadMessage(ctx)
 	if err != nil {
 		return fmt.Errorf("read init: %w", err)
@@ -154,30 +163,34 @@ func (d *Debugger) commandLoop(ctx context.Context) error {
 }
 
 func (d *Debugger) processBreak(ctx context.Context) (bool, error) {
-	result, err := d.doStep(ctx, "step_into")
-	if err != nil {
-		return false, fmt.Errorf("initial step: %w", err)
+	for {
+		result, err := d.doStep(ctx, "run")
+		if err != nil {
+			return false, fmt.Errorf("run: %w", err)
+		}
+
+		d.internal.status = result.Status
+		d.internal.currentFile = toRelative(result.Filename, d.remoteRoot)
+		d.internal.currentLine = result.Lineno
+
+		switch result.Status {
+		case plugins.StatusBreak:
+			// hasPrefix("/") = outside project → keep running
+			if strings.HasPrefix(d.internal.currentFile, "/") {
+				d.emit()
+				continue
+			}
+			return false, d.handleBreak(ctx)
+
+		case plugins.StatusStopping, plugins.StatusStopped:
+			d.emit()
+			return true, nil
+
+		case plugins.StatusRunning:
+			d.emit()
+			return false, nil
+		}
 	}
-
-	d.internal.status = result.Status
-	d.internal.currentFile = toRelative(result.Filename, d.remoteRoot)
-	d.internal.currentLine = result.Lineno
-
-	switch result.Status {
-	case plugins.StatusBreak:
-		return false, d.handleBreak(ctx)
-
-	case plugins.StatusStopping, plugins.StatusStopped:
-		d.emit()
-		return true, nil
-
-	case plugins.StatusRunning:
-		d.emit()
-
-	case plugins.StatusStarting:
-	}
-
-	return false, nil
 }
 
 func (d *Debugger) handleBreak(ctx context.Context) error {

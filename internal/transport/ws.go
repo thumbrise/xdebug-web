@@ -12,6 +12,8 @@ import (
 	"github.com/thumbrise/xdebug-web/pkg/plugins"
 )
 
+const maxMsgBuf = 64
+
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
@@ -54,19 +56,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close()
 	}()
 
-	sub := h.subscribeToSession(ctx)
-	if sub != nil {
-		defer h.store.Active().Unsubscribe(sub)
-	}
+	stateCh := h.subscribeToSessions(ctx)
 
 	done := make(chan struct{})
 
 	go h.readLoop(ctx, conn, done)
 
-	h.writeLoop(ctx, conn, done, sub)
+	h.writeLoop(ctx, conn, done, stateCh)
 }
 
-func (h *Handler) writeLoop(ctx context.Context, conn *websocket.Conn, done chan struct{}, sub chan *plugins.State) {
+func (h *Handler) writeLoop(ctx context.Context, conn *websocket.Conn, done chan struct{}, stateCh chan OutgoingMessage) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -75,15 +74,9 @@ func (h *Handler) writeLoop(ctx context.Context, conn *websocket.Conn, done chan
 		case <-done:
 			return
 
-		case state, ok := <-sub:
+		case msg, ok := <-stateCh:
 			if !ok {
 				return
-			}
-
-			msg := OutgoingMessage{
-				Type:   "state",
-				Data:   state,
-				Source: h.store.Active().ID(),
 			}
 
 			data, err := json.Marshal(msg)
@@ -116,27 +109,90 @@ func (h *Handler) readLoop(_ context.Context, conn *websocket.Conn, done chan st
 			continue
 		}
 
-		sess := h.store.Active()
-		if sess == nil {
-			continue
-		}
-
 		pluginCmd, err := toPluginCommand(cmd)
 		if err != nil {
 			continue
 		}
 
-		sess.SendCommand(pluginCmd)
+		if cmd.Type == "breakpoint_set" || cmd.Type == "breakpoint_remove" {
+			if cmd.Type == "breakpoint_set" {
+				h.store.SaveBreakpoint(cmd.Args["file"], cmd.Args["line"])
+			} else {
+				h.store.DeleteBreakpoint(cmd.Args["file"], cmd.Args["line"])
+			}
+
+			for _, sess := range h.store.All() {
+				sess.SendCommand(pluginCmd)
+			}
+		} else {
+			sess := h.store.Active()
+			if sess == nil {
+				continue
+			}
+
+			sess.SendCommand(pluginCmd)
+		}
 	}
 }
 
-func (h *Handler) subscribeToSession(_ context.Context) chan *plugins.State {
-	active := h.store.Active()
-	if active == nil {
-		return nil
+func (h *Handler) subscribeToSessions(ctx context.Context) chan OutgoingMessage {
+	ch := make(chan OutgoingMessage, maxMsgBuf)
+
+	for _, sess := range h.store.All() {
+		h.forwardSession(ctx, sess, ch)
 	}
 
-	return active.Subscribe()
+	newSessions := h.store.SubscribeNew()
+
+	go func() {
+		<-ctx.Done()
+		h.store.UnsubscribeNew(newSessions)
+	}()
+
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case sess := <-newSessions:
+				h.forwardSession(ctx, sess, ch)
+			}
+		}
+	}()
+
+	return ch
+}
+
+func (h *Handler) forwardSession(ctx context.Context, sess *session.Session, ch chan OutgoingMessage) {
+	sub := sess.Subscribe()
+
+	go func() {
+		defer sess.Unsubscribe(sub)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+
+			case state, ok := <-sub:
+				if !ok {
+					return
+				}
+
+				msg := OutgoingMessage{
+					Type:   "state",
+					Data:   state,
+					Source: sess.ID(),
+				}
+
+				select {
+				case ch <- msg:
+				default:
+				}
+			}
+		}
+	}()
 }
 
 func toPluginCommand(cmd IncomingCommand) (plugins.Command, error) {

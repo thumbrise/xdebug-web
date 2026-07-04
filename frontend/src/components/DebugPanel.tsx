@@ -53,6 +53,9 @@ export function DebugPanel({ state, onSend }: DebugPanelProps) {
     )
   }
 
+  const stack = state.stack ?? []
+  const locals = state.locals ?? []
+  const globals = state.globals ?? []
   const isBreak = state.status === 'break'
 
   return (
@@ -96,9 +99,9 @@ export function DebugPanel({ state, onSend }: DebugPanelProps) {
       </div>
 
       <div className="debug-info">
-        <StackTrace frames={state.stack} />
-        {state.locals.length > 0 && <VariableList name="Locals" variables={state.locals} />}
-        {state.globals.length > 0 && <VariableList name="Globals" variables={state.globals} />}
+        <StackTrace frames={stack} />
+        {locals.length > 0 && <VariableList name="Locals" variables={locals} />}
+        {globals.length > 0 && <VariableList name="Globals" variables={globals} />}
       </div>
     </div>
   )
