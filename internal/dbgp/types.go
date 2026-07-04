@@ -51,7 +51,16 @@ const (
 	CmdRun      CommandType = "run"
 	CmdStop     CommandType = "stop"
 	CmdBreak    CommandType = "break"
+
+	CmdBreakpointSet    CommandType = "breakpoint_set"
+	CmdBreakpointRemove CommandType = "breakpoint_remove"
 )
+
+type Breakpoint struct {
+	ID   string `json:"id"`
+	File string `json:"file"`
+	Line int    `json:"line"`
+}
 
 type Command struct {
 	Type  CommandType

@@ -8,13 +8,14 @@ import (
 
 type State struct {
 	mu          sync.RWMutex
-	Status      dbgp.Status     `json:"status"`
-	InitInfo    *dbgp.InitInfo  `json:"initInfo,omitempty"`
-	CurrentFile string          `json:"currentFile"`
-	CurrentLine int             `json:"currentLine"`
-	Stack       []dbgp.Frame    `json:"stack"`
-	Locals      []dbgp.Variable `json:"locals"`
-	Globals     []dbgp.Variable `json:"globals"`
+	Status      dbgp.Status       `json:"status"`
+	InitInfo    *dbgp.InitInfo    `json:"initInfo,omitempty"`
+	CurrentFile string            `json:"currentFile"`
+	CurrentLine int               `json:"currentLine"`
+	Stack       []dbgp.Frame      `json:"stack"`
+	Locals      []dbgp.Variable   `json:"locals"`
+	Globals     []dbgp.Variable   `json:"globals"`
+	Breakpoints []dbgp.Breakpoint `json:"breakpoints"`
 }
 
 func NewState() *State {
@@ -82,6 +83,13 @@ func (s *State) UpdateGlobals(vars []dbgp.Variable) {
 	s.Globals = vars
 }
 
+func (s *State) UpdateBreakpoints(bps []dbgp.Breakpoint) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.Breakpoints = bps
+}
+
 func (s *State) Snapshot() *State {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -94,7 +102,19 @@ func (s *State) Snapshot() *State {
 		Stack:       copyFrames(s.Stack),
 		Locals:      copyVariables(s.Locals),
 		Globals:     copyVariables(s.Globals),
+		Breakpoints: copyBreakpoints(s.Breakpoints),
 	}
+}
+
+func copyBreakpoints(in []dbgp.Breakpoint) []dbgp.Breakpoint {
+	if in == nil {
+		return nil
+	}
+
+	out := make([]dbgp.Breakpoint, len(in))
+	copy(out, in)
+
+	return out
 }
 
 func copyFrames(in []dbgp.Frame) []dbgp.Frame {

@@ -5,7 +5,7 @@ interface UseDebuggerReturn {
   state: DebugState | null
   connected: boolean
   status: DebugStatus
-  send: (cmd: string) => void
+  send: (cmd: string, args?: Record<string, string>) => void
 }
 
 const WS_RECONNECT_DELAY = 3000
@@ -14,7 +14,8 @@ export function useDebugger(): UseDebuggerReturn {
   const [state, setState] = useState<DebugState | null>(null)
   const [connected, setConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
-  const reconnectRef = useRef<ReturnType<typeof setTimeout>>()
+  const reconnectRef = useRef<ReturnType<typeof setTimeout>>(null)
+  const mountedRef = useRef(false)
 
   const connect = useCallback(() => {
     const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -27,6 +28,8 @@ export function useDebugger(): UseDebuggerReturn {
     }
 
     ws.onclose = () => {
+      if (!mountedRef.current || wsRef.current !== ws) return
+
       setConnected(false)
       reconnectRef.current = setTimeout(connect, WS_RECONNECT_DELAY)
     }
@@ -51,22 +54,33 @@ export function useDebugger(): UseDebuggerReturn {
   }, [])
 
   useEffect(() => {
+    mountedRef.current = true
     connect()
 
     return () => {
-      clearTimeout(reconnectRef.current)
+      mountedRef.current = false
 
-      if (wsRef.current) {
-        wsRef.current.close()
+      if (reconnectRef.current !== null) {
+        clearTimeout(reconnectRef.current)
+        reconnectRef.current = null
       }
+
+      const ws = wsRef.current
+
+      // Only close if OPEN – closing a CONNECTING socket emits a spurious error
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close()
+      }
+
+      wsRef.current = null
     }
   }, [connect])
 
-  const send = useCallback((cmd: string) => {
+  const send = useCallback((cmd: string, args?: Record<string, string>) => {
     const ws = wsRef.current
 
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: cmd }))
+      ws.send(JSON.stringify({ type: cmd, args }))
     }
   }, [])
 

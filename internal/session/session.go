@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 
 	"github.com/thumbrise/xdebug-web/internal/dbgp"
 	"github.com/thumbrise/xdebug-web/internal/pathmap"
@@ -12,28 +13,35 @@ import (
 
 const maxMsgBuf = 64
 
-var ErrUnknownCmdType = errors.New("unknown command type")
+var (
+	ErrUnknownCmdType        = errors.New("unknown command type")
+	ErrMissingBreakpointArgs = errors.New("breakpoint command missing required args")
+)
 
 type Session struct {
-	conn       *dbgp.Conn
-	state      *State
-	cmds       chan dbgp.Command
-	subs       []chan *State
-	done       chan struct{}
-	txID       int
-	logger     *slog.Logger
-	remoteRoot string
+	conn        *dbgp.Conn
+	state       *State
+	cmds        chan dbgp.Command
+	subs        []chan *State
+	done        chan struct{}
+	txID        int
+	logger      *slog.Logger
+	remoteRoot  string
+	root        string
+	breakpoints map[string]dbgp.Breakpoint // file:line → bp
 }
 
-func NewSession(conn *dbgp.Conn, logger *slog.Logger, remoteRoot string) *Session {
+func NewSession(conn *dbgp.Conn, logger *slog.Logger, remoteRoot, root string) *Session {
 	return &Session{
-		conn:       conn,
-		logger:     logger.With("subsystem", "session"),
-		state:      NewState(),
-		txID:       0,
-		cmds:       make(chan dbgp.Command, maxMsgBuf),
-		done:       make(chan struct{}),
-		remoteRoot: remoteRoot,
+		conn:        conn,
+		logger:      logger.With("subsystem", "session"),
+		state:       NewState(),
+		txID:        0,
+		cmds:        make(chan dbgp.Command, maxMsgBuf),
+		done:        make(chan struct{}),
+		remoteRoot:  remoteRoot,
+		root:        root,
+		breakpoints: make(map[string]dbgp.Breakpoint),
 	}
 }
 
@@ -68,6 +76,16 @@ func (s *Session) commandLoop(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+
+		case cmd := <-s.cmds:
+			result, err := s.executeCommand(ctx, cmd)
+			if err != nil {
+				s.logger.ErrorContext(ctx, "command", "cmd", cmd.Type, "error", err)
+				continue
+			}
+			if done := s.afterCommand(ctx, result); done {
+				return nil
+			}
 
 		default:
 			if done, err := s.processBreak(ctx); err != nil {
@@ -188,6 +206,20 @@ func (s *Session) executeCommand(ctx context.Context, cmd dbgp.Command) (*dbgp.S
 	case dbgp.CmdBreak:
 		return &dbgp.StepResult{Status: dbgp.StatusBreak}, nil
 
+	case dbgp.CmdBreakpointSet:
+		if err := s.handleBreakpointSet(ctx, cmd); err != nil {
+			return nil, err
+		}
+
+		return &dbgp.StepResult{Status: dbgp.StatusBreak}, nil
+
+	case dbgp.CmdBreakpointRemove:
+		if err := s.handleBreakpointRemove(ctx, cmd); err != nil {
+			return nil, err
+		}
+
+		return &dbgp.StepResult{Status: dbgp.StatusBreak}, nil
+
 	default:
 		return nil, fmt.Errorf("%s: %w", cmd.Type, ErrUnknownCmdType)
 	}
@@ -290,6 +322,95 @@ func (s *Session) State() *State {
 
 func (s *Session) toRelative(uri string) string {
 	return pathmap.ToRelative(uri, s.remoteRoot)
+}
+
+func (s *Session) toURI(relativePath string) string {
+	return pathmap.ToURI(relativePath, s.root, s.remoteRoot)
+}
+
+func (s *Session) handleBreakpointSet(ctx context.Context, cmd dbgp.Command) error {
+	file := cmd.Args["file"]
+
+	lineStr := cmd.Args["line"]
+	if file == "" || lineStr == "" {
+		return ErrMissingBreakpointArgs
+	}
+
+	line, err := strconv.Atoi(lineStr)
+	if err != nil {
+		return fmt.Errorf("breakpoint_set invalid line: %w", err)
+	}
+
+	s.txID++
+
+	uri := s.toURI(file)
+	bpCmd := dbgp.FormatBreakpointSetCmd(s.txID, uri, line)
+
+	if err := s.conn.SendMessage(ctx, bpCmd); err != nil {
+		return fmt.Errorf("send breakpoint_set: %w", err)
+	}
+
+	data, err := s.conn.ReadMessage(ctx)
+	if err != nil {
+		return fmt.Errorf("read breakpoint_set: %w", err)
+	}
+
+	bpID, err := dbgp.ParseBreakpointSetResponse(data)
+	if err != nil {
+		return fmt.Errorf("parse breakpoint_set: %w", err)
+	}
+
+	key := file + ":" + lineStr
+	s.breakpoints[key] = dbgp.Breakpoint{ID: bpID, File: file, Line: line}
+	s.syncBreakpointsState()
+
+	return nil
+}
+
+func (s *Session) handleBreakpointRemove(ctx context.Context, cmd dbgp.Command) error {
+	id := cmd.Args["id"]
+	if id == "" {
+		return ErrMissingBreakpointArgs
+	}
+
+	s.txID++
+
+	rmCmd := dbgp.FormatBreakpointRemoveCmd(s.txID, id)
+
+	if err := s.conn.SendMessage(ctx, rmCmd); err != nil {
+		return fmt.Errorf("send breakpoint_remove: %w", err)
+	}
+
+	data, err := s.conn.ReadMessage(ctx)
+	if err != nil {
+		return fmt.Errorf("read breakpoint_remove: %w", err)
+	}
+
+	if _, err := dbgp.ParseStepResponse(data); err != nil {
+		return fmt.Errorf("parse breakpoint_remove: %w", err)
+	}
+
+	for k, bp := range s.breakpoints {
+		if bp.ID == id {
+			delete(s.breakpoints, k)
+
+			break
+		}
+	}
+
+	s.syncBreakpointsState()
+
+	return nil
+}
+
+func (s *Session) syncBreakpointsState() {
+	bps := make([]dbgp.Breakpoint, 0, len(s.breakpoints))
+
+	for _, bp := range s.breakpoints {
+		bps = append(bps, bp)
+	}
+
+	s.state.UpdateBreakpoints(bps)
 }
 
 func (s *Session) broadcast() {

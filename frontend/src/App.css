@@ -414,3 +414,30 @@ body {
   text-align: center;
   color: var(--text-muted);
 }
+
+/* Breakpoint */
+.breakpoint-glyph {
+  background: #e51400;
+  border-radius: 50%;
+  width: 10px !important;
+  height: 10px !important;
+  margin: 4px;
+  cursor: pointer;
+}
+
+.breakpoint-line {
+  background: rgba(229, 20, 0, 0.12);
+}
+
+.current-line-arrow {
+  background: var(--warning);
+  clip-path: polygon(0 0, 100% 25%, 100% 75%, 0 100%);
+  width: 10px !important;
+  height: 12px !important;
+  margin: 3px 4px;
+}
+
+.current-line-highlight {
+  background: rgba(204, 167, 0, 0.15);
+  border-left: 3px solid var(--warning);
+}

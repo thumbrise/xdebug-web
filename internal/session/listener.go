@@ -17,14 +17,16 @@ type Listener struct {
 	mu         sync.Mutex
 	running    bool
 	remoteRoot string
+	root       string
 }
 
-func NewListener(addr string, store *Store, logger *slog.Logger, remoteRoot string) *Listener {
+func NewListener(addr string, store *Store, logger *slog.Logger, remoteRoot, root string) *Listener {
 	return &Listener{
 		addr:       addr,
 		store:      store,
 		logger:     logger.With("subsystem", "listener"),
 		remoteRoot: remoteRoot,
+		root:       root,
 	}
 }
 
@@ -67,7 +69,7 @@ func (l *Listener) Listen(ctx context.Context) error {
 		l.logger.InfoContext(ctx, "xdebug connected", "remote", conn.RemoteAddr())
 
 		dbgpConn := dbgp.NewConn(conn)
-		sess := NewSession(dbgpConn, l.logger, l.remoteRoot)
+		sess := NewSession(dbgpConn, l.logger, l.remoteRoot, l.root)
 
 		l.store.Add(sess)
 

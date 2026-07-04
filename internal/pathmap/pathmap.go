@@ -11,3 +11,16 @@ func ToRelative(uri, remoteRoot string) string {
 
 	return strings.TrimPrefix(path, remoteRoot+"/")
 }
+
+func ToURI(relativePath, root, remoteRoot string) string {
+	if strings.HasPrefix(relativePath, "/") {
+		return "file://" + relativePath
+	}
+
+	base := remoteRoot
+	if base == "" {
+		base = root
+	}
+
+	return "file://" + base + "/" + relativePath
+}

@@ -1,6 +1,8 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useCallback } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import type { editor } from 'monaco-editor'
+import type { Breakpoint } from '../types'
+import { detectLanguage } from '../utils/language'
 
 interface EditorViewProps {
   path: string | null
@@ -8,48 +10,117 @@ interface EditorViewProps {
   loading: boolean
   error: string | null
   currentLine: number | null
+  breakpoints: Breakpoint[]
+  onToggleBreakpoint: (file: string, line: number) => void
 }
 
-export function EditorView({ path, content, loading, error, currentLine }: EditorViewProps) {
+export function EditorView({ path, content, loading, error, currentLine, breakpoints, onToggleBreakpoint }: EditorViewProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
+  const bpDeco = useRef<string[]>([])
+  const clDeco = useRef<string[]>([])
+  const pathRef = useRef(path)
+  const onToggleRef = useRef(onToggleBreakpoint)
+
+  pathRef.current = path
+  onToggleRef.current = onToggleBreakpoint
+
+  const toggle = useCallback((line: number) => {
+    if (!pathRef.current) return
+
+    console.log('[breakpoint] toggle', pathRef.current, line)
+    onToggleRef.current(pathRef.current, line)
+  }, [])
+
+  const syncBreakpoints = useCallback(() => {
+    const ed = editorRef.current
+
+    if (!ed || !pathRef.current) return
+
+    const model = ed.getModel()
+
+    if (!model) return
+
+    const fileBps = breakpoints.filter((bp) => bp.file === pathRef.current)
+
+    const decorations = fileBps.map((bp) => ({
+      range: {
+        startLineNumber: bp.line,
+        startColumn: 1,
+        endLineNumber: bp.line,
+        endColumn: 1,
+      },
+      options: {
+        isWholeLine: true,
+        className: 'breakpoint-line',
+        glyphMarginClassName: 'breakpoint-glyph',
+        glyphMarginHoverMessage: { value: 'Breakpoint' },
+      } satisfies editor.IModelDecorationOptions,
+    }))
+
+    bpDeco.current = ed.deltaDecorations(bpDeco.current, decorations)
+  }, [breakpoints])
+
+  const syncCurrentLine = useCallback(() => {
+    const ed = editorRef.current
+
+    if (!ed) return
+
+    if (currentLine === null) {
+      clDeco.current = ed.deltaDecorations(clDeco.current, [])
+      return
+    }
+
+    const decoration = {
+      range: {
+        startLineNumber: currentLine,
+        startColumn: 1,
+        endLineNumber: currentLine,
+        endColumn: 1,
+      },
+      options: {
+        isWholeLine: true,
+        className: 'current-line-highlight',
+        glyphMarginClassName: 'current-line-arrow',
+      } satisfies editor.IModelDecorationOptions,
+    }
+
+    clDeco.current = ed.deltaDecorations(clDeco.current, [decoration])
+  }, [currentLine])
 
   const handleMount: OnMount = (editor) => {
     editorRef.current = editor
+
+    editor.onMouseDown((e) => {
+      if (e.target.type !== 2 && e.target.type !== 3) return
+
+      const line = e.target.position?.lineNumber
+
+      if (line) toggle(line)
+    })
+
+    syncBreakpoints()
+    syncCurrentLine()
   }
 
   useEffect(() => {
-    if (editorRef.current && currentLine !== null) {
-      editorRef.current.revealLineInCenter(currentLine)
-      editorRef.current.setPosition({ lineNumber: currentLine, column: 1 })
-      editorRef.current.focus()
+    if (editorRef.current) syncBreakpoints()
+  }, [syncBreakpoints])
+
+  useEffect(() => {
+    const ed = editorRef.current
+
+    if (!ed) return
+
+    syncCurrentLine()
+
+    if (currentLine !== null) {
+      ed.revealLineInCenter(currentLine)
+      ed.setPosition({ lineNumber: currentLine, column: 1 })
+      ed.focus()
     }
-  }, [currentLine])
+  }, [currentLine, syncCurrentLine])
 
-  const filename = path ? path.split('/').pop() || path : ''
-
-  const language = filename.endsWith('.php')
-    ? 'php'
-    : filename.endsWith('.js') || filename.endsWith('.mjs')
-      ? 'javascript'
-      : filename.endsWith('.ts') || filename.endsWith('.tsx')
-        ? 'typescript'
-        : filename.endsWith('.css')
-          ? 'css'
-          : filename.endsWith('.html')
-            ? 'html'
-            : filename.endsWith('.json')
-              ? 'json'
-              : filename.endsWith('.md')
-                ? 'markdown'
-                : filename.endsWith('.go')
-                  ? 'go'
-                  : filename.endsWith('.yaml') || filename.endsWith('.yml')
-                    ? 'yaml'
-                    : filename.endsWith('.sql')
-                      ? 'sql'
-                      : filename.endsWith('.xml')
-                        ? 'xml'
-                        : 'plaintext'
+  const language = path ? detectLanguage(path) : 'plaintext'
 
   if (!path) {
     return (
@@ -95,7 +166,7 @@ export function EditorView({ path, content, loading, error, currentLine }: Edito
           wordWrap: 'on',
           tabSize: 4,
           renderWhitespace: 'selection',
-          glyphMargin: false,
+          glyphMargin: true,
           folding: true,
           lineDecorationsWidth: 8,
           lineNumbersMinChars: 3,

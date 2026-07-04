@@ -24,6 +24,12 @@ export interface StackFrame {
   where: string
 }
 
+export interface Breakpoint {
+  id: string
+  file: string
+  line: number
+}
+
 export interface DebugVariable {
   name: string
   value: string
@@ -43,6 +49,7 @@ export interface DebugState {
   stack: StackFrame[]
   locals: DebugVariable[]
   globals: DebugVariable[]
+  breakpoints: Breakpoint[]
 }
 
 export interface OutgoingMessage {

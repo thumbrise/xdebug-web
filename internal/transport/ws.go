@@ -152,6 +152,10 @@ func toDBGpCommand(cmd IncomingCommand) (dbgp.Command, error) {
 		cmdType = dbgp.CmdRun
 	case "stop":
 		cmdType = dbgp.CmdStop
+	case "breakpoint_set":
+		cmdType = dbgp.CmdBreakpointSet
+	case "breakpoint_remove":
+		cmdType = dbgp.CmdBreakpointRemove
 	default:
 		return dbgp.Command{}, dbgp.ErrUnknownCommand
 	}

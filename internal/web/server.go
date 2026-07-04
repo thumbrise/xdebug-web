@@ -37,7 +37,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	sessionStore := session.NewStore()
 	r := s.setupRouter(sessionStore)
 
-	dbgpListener := session.NewListener(s.dbgpAddr(), sessionStore, s.logger, s.config.RootRemote)
+	dbgpListener := session.NewListener(s.dbgpAddr(), sessionStore, s.logger, s.config.RootRemote, s.config.Root)
 
 	go func() {
 		if err := dbgpListener.Listen(ctx); err != nil && ctx.Err() == nil {

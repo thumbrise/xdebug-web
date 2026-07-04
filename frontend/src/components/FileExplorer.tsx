@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FileEntry } from '../types'
 
 interface FileExplorerProps {
@@ -11,11 +11,28 @@ interface TreeNodeProps {
   entry: FileEntry
   selectedPath: string | null
   onSelect: (path: string) => void
+  expandedPaths: Set<string>
+  onToggle: (path: string) => void
   depth: number
 }
 
-function TreeNode({ entry, selectedPath, onSelect, depth }: TreeNodeProps) {
-  const [expanded, setExpanded] = useState(depth < 2)
+function getAncestors(path: string): string[] {
+  const parts = path.split('/')
+  const ancestors: string[] = []
+
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (i === 0) {
+      ancestors.push(parts[0])
+    } else {
+      ancestors.push(ancestors[i - 1] + '/' + parts[i])
+    }
+  }
+
+  return ancestors
+}
+
+function TreeNode({ entry, selectedPath, onSelect, expandedPaths, onToggle, depth }: TreeNodeProps) {
+  const expanded = expandedPaths.has(entry.path)
 
   if (entry.type === 'directory') {
     return (
@@ -23,10 +40,7 @@ function TreeNode({ entry, selectedPath, onSelect, depth }: TreeNodeProps) {
         <div
           className={`file-tree-item file-tree-dir ${selectedPath === entry.path ? 'selected' : ''}`}
           style={{ paddingLeft: `${8 + depth * 16}px` }}
-          onClick={() => {
-            setExpanded(!expanded)
-            onSelect(entry.path)
-          }}
+          onClick={() => onToggle(entry.path)}
         >
           <span className="file-tree-arrow">{expanded ? '▼' : '▶'}</span>
           <span className="file-tree-icon">📁</span>
@@ -38,6 +52,8 @@ function TreeNode({ entry, selectedPath, onSelect, depth }: TreeNodeProps) {
             entry={child}
             selectedPath={selectedPath}
             onSelect={onSelect}
+            expandedPaths={expandedPaths}
+            onToggle={onToggle}
             depth={depth + 1}
           />
         ))}
@@ -61,6 +77,56 @@ function TreeNode({ entry, selectedPath, onSelect, depth }: TreeNodeProps) {
 }
 
 export function FileExplorer({ entries, selectedPath, onSelect }: FileExplorerProps) {
+  const [expandedPaths, setExpandedPaths] = useState<Set<string>>(() => {
+    const init = new Set<string>()
+
+    for (const entry of entries) {
+      if (entry.type === 'directory') {
+        init.add(entry.path)
+      }
+    }
+
+    return init
+  })
+
+  const prevSelected = useRef(selectedPath)
+
+  useEffect(() => {
+    if (!selectedPath || selectedPath === prevSelected.current) {
+      return
+    }
+
+    prevSelected.current = selectedPath
+
+    setExpandedPaths((prev) => {
+      const next = new Set(prev)
+      let changed = false
+
+      for (const ancestor of getAncestors(selectedPath)) {
+        if (!next.has(ancestor)) {
+          next.add(ancestor)
+          changed = true
+        }
+      }
+
+      return changed ? next : prev
+    })
+  }, [selectedPath])
+
+  function toggleExpand(path: string) {
+    setExpandedPaths((prev) => {
+      const next = new Set(prev)
+
+      if (next.has(path)) {
+        next.delete(path)
+      } else {
+        next.add(path)
+      }
+
+      return next
+    })
+  }
+
   return (
     <div className="file-explorer">
       <div className="file-explorer-header">Files</div>
@@ -71,6 +137,8 @@ export function FileExplorer({ entries, selectedPath, onSelect }: FileExplorerPr
             entry={entry}
             selectedPath={selectedPath}
             onSelect={onSelect}
+            expandedPaths={expandedPaths}
+            onToggle={toggleExpand}
             depth={0}
           />
         ))}
