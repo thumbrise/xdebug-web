@@ -13,17 +13,15 @@ import (
 
 const maxMsgBuf = 64
 
-var (
-	errMissingBreakpointArgs = errors.New("breakpoint command missing required args")
-)
+var errMissingBreakpointArgs = errors.New("breakpoint command missing required args")
 
 type state struct {
-	status       plugins.Status
-	currentFile  string
-	currentLine  int
-	stack        []plugins.Frame
-	locals       []plugins.Variable
-	breakpoints  []plugins.Breakpoint
+	status      plugins.Status
+	currentFile string
+	currentLine int
+	stack       []plugins.Frame
+	locals      []plugins.Variable
+	breakpoints []plugins.Breakpoint
 }
 
 func newState() *state {
@@ -36,10 +34,10 @@ func newState() *state {
 }
 
 type Debugger struct {
-	conn        *conn
-	logger      *slog.Logger
-	remoteRoot  string
-	root        string
+	conn       *conn
+	logger     *slog.Logger
+	remoteRoot string
+	root       string
 
 	txID        int
 	cmds        chan plugins.Command
@@ -126,6 +124,7 @@ func (d *Debugger) Run(ctx context.Context) error {
 	return d.commandLoop(ctx)
 }
 
+//nolint:cyclop
 func (d *Debugger) commandLoop(ctx context.Context) error {
 	for {
 		select {
@@ -133,6 +132,12 @@ func (d *Debugger) commandLoop(ctx context.Context) error {
 			return ctx.Err()
 
 		case cmd := <-d.cmds:
+			if cmd.Type == plugins.CmdPropertyGet {
+				d.handlePropertyGet(ctx, cmd)
+
+				continue
+			}
+
 			result, err := d.executeCommand(ctx, cmd)
 			if err != nil {
 				d.logger.ErrorContext(ctx, "command", "cmd", cmd.Type, "error", err)
@@ -170,29 +175,37 @@ func (d *Debugger) processBreak(ctx context.Context) (bool, error) {
 		}
 
 		d.internal.status = result.Status
-		d.internal.currentFile = toRelative(result.Filename, d.remoteRoot)
-		d.internal.currentLine = result.Lineno
 
+		if result.Filename != "" {
+			d.internal.currentFile = toRelative(result.Filename, d.remoteRoot)
+			d.internal.currentLine = result.Lineno
+		}
+		//nolint:exhaustive
 		switch result.Status {
 		case plugins.StatusBreak:
 			// hasPrefix("/") = outside project → keep running
 			if strings.HasPrefix(d.internal.currentFile, "/") {
 				d.emit()
+
 				continue
 			}
+
 			return false, d.handleBreak(ctx)
 
 		case plugins.StatusStopping, plugins.StatusStopped:
 			d.emit()
+
 			return true, nil
 
 		case plugins.StatusRunning:
 			d.emit()
+
 			return false, nil
 		}
 	}
 }
 
+//nolint:cyclop
 func (d *Debugger) handleBreak(ctx context.Context) error {
 	if err := d.refreshStack(ctx); err != nil {
 		d.logger.WarnContext(ctx, "refresh stack", "error", err)
@@ -210,6 +223,12 @@ func (d *Debugger) handleBreak(ctx context.Context) error {
 			return ctx.Err()
 
 		case cmd := <-d.cmds:
+			if cmd.Type == plugins.CmdPropertyGet {
+				d.handlePropertyGet(ctx, cmd)
+
+				continue
+			}
+
 			result, err := d.executeCommand(ctx, cmd)
 			if err != nil {
 				d.logger.ErrorContext(ctx, "command", "cmd", cmd.Type, "error", err)
@@ -234,8 +253,11 @@ func (d *Debugger) handleBreak(ctx context.Context) error {
 
 func (d *Debugger) afterCommand(ctx context.Context, result *stepResult) bool {
 	d.internal.status = result.Status
-	d.internal.currentFile = toRelative(result.Filename, d.remoteRoot)
-	d.internal.currentLine = result.Lineno
+
+	if result.Filename != "" {
+		d.internal.currentFile = toRelative(result.Filename, d.remoteRoot)
+		d.internal.currentLine = result.Lineno
+	}
 
 	switch result.Status {
 	case plugins.StatusBreak:
@@ -251,6 +273,7 @@ func (d *Debugger) afterCommand(ctx context.Context, result *stepResult) bool {
 
 	case plugins.StatusStopping, plugins.StatusStopped:
 		d.emit()
+
 		return true
 
 	case plugins.StatusRunning:
@@ -263,6 +286,7 @@ func (d *Debugger) afterCommand(ctx context.Context, result *stepResult) bool {
 }
 
 func (d *Debugger) executeCommand(ctx context.Context, cmd plugins.Command) (*stepResult, error) {
+	//nolint:exhaustive
 	switch cmd.Type {
 	case plugins.CmdStepInto, plugins.CmdStepOver, plugins.CmdStepOut, plugins.CmdRun:
 		return d.doStep(ctx, string(cmd.Type))
@@ -427,6 +451,7 @@ func (d *Debugger) handleBreakpointRemove(ctx context.Context, cmd plugins.Comma
 	for k, bp := range d.breakpoints {
 		if bp.ID == id {
 			delete(d.breakpoints, k)
+
 			break
 		}
 	}
@@ -444,4 +469,50 @@ func (d *Debugger) syncBreakpoints() {
 	}
 
 	d.internal.breakpoints = bps
+}
+
+var ErrNoPropertyName = errors.New("property_get missing name")
+
+func (d *Debugger) handlePropertyGet(ctx context.Context, cmd plugins.Command) {
+	name := cmd.Args["name"]
+	if name == "" {
+		if cmd.Reply != nil {
+			cmd.Reply <- ErrNoPropertyName
+		}
+
+		return
+	}
+
+	d.txID++
+
+	rawCmd := formatPropertyGetCmd(d.txID, 0, name)
+	if err := d.conn.SendMessage(ctx, rawCmd); err != nil {
+		if cmd.Reply != nil {
+			cmd.Reply <- fmt.Errorf("send property_get: %w", err)
+		}
+
+		return
+	}
+
+	data, err := d.conn.ReadMessage(ctx)
+	if err != nil {
+		if cmd.Reply != nil {
+			cmd.Reply <- fmt.Errorf("read property_get: %w", err)
+		}
+
+		return
+	}
+
+	vars, err := parsePropertyGetResponse(data)
+	if err != nil {
+		if cmd.Reply != nil {
+			cmd.Reply <- err
+		}
+
+		return
+	}
+
+	if cmd.Reply != nil {
+		cmd.Reply <- vars
+	}
 }

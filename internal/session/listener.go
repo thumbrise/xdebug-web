@@ -79,8 +79,13 @@ func (l *Listener) Listen(ctx context.Context) error {
 		go func() {
 			defer func() {
 				l.store.Remove(sess)
-				dbg.Close()
-				l.logger.InfoContext(ctx, "xdebug disconnected", "remote", conn.RemoteAddr())
+
+				err = dbg.Close()
+				if err != nil {
+					l.logger.ErrorContext(ctx, "xdebug disconnect error", slog.String("error", err.Error()))
+				} else {
+					l.logger.InfoContext(ctx, "xdebug disconnected", "remote", conn.RemoteAddr())
+				}
 			}()
 
 			l.store.SyncBreakpoints(sess)

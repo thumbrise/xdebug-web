@@ -171,10 +171,15 @@ body {
 }
 
 /* Debug Panel */
+.debug-panel-wrapper {
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
 .debug-panel {
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
-  max-height: 220px;
+  height: 100%;
   overflow-y: auto;
 }
 
@@ -294,6 +299,31 @@ body {
   font-size: 11px;
   color: var(--text-muted);
 }
+
+.debug-var-indent {
+  display: inline-block;
+}
+
+.debug-var-toggle {
+  display: inline-block;
+  width: 12px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 9px;
+  user-select: none;
+}
+
+.debug-var-toggle-spacer {
+  display: inline-block;
+  width: 12px;
+}
+
+.debug-var-toggle:hover {
+  color: var(--text-primary);
+}
+
+.debug-variable-children {
+  /* nest children under parent */
 
 .debug-empty {
   padding: 12px;
@@ -440,4 +470,19 @@ body {
 .current-line-highlight {
   background: rgba(204, 167, 0, 0.15);
   border-left: 3px solid var(--warning);
+}
+
+/* Resize Handle */
+.resize-handle {
+  height: 4px;
+  cursor: ns-resize;
+  background: var(--bg-tertiary);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  user-select: none;
+}
+
+.resize-handle:hover {
+  background: var(--accent);
 }

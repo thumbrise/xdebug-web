@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { DebugState, DebugStatus } from '../types'
+import type { DebugState, DebugStatus, DebugVariable } from '../types'
 
 interface UseDebuggerReturn {
   state: DebugState | null
   connected: boolean
   status: DebugStatus
   send: (cmd: string, args?: Record<string, string>) => void
+  propertyData: Record<string, DebugVariable[]>
 }
 
 const WS_RECONNECT_DELAY = 3000
@@ -13,6 +14,7 @@ const WS_RECONNECT_DELAY = 3000
 export function useDebugger(): UseDebuggerReturn {
   const [state, setState] = useState<DebugState | null>(null)
   const [connected, setConnected] = useState(false)
+  const [propertyData, setPropertyData] = useState<Record<string, DebugVariable[]>>({})
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectRef = useRef<ReturnType<typeof setTimeout>>(null)
   const mountedRef = useRef(false)
@@ -44,6 +46,15 @@ export function useDebugger(): UseDebuggerReturn {
 
         if (msg.type === 'state' && msg.data) {
           setState(msg.data)
+
+          return
+        }
+
+        if (msg.type === 'property_get_result' && msg.data) {
+          setPropertyData((prev) => ({
+            ...prev,
+            [msg.data.name]: msg.data.children,
+          }))
         }
       } catch {
         // ignore malformed messages
@@ -86,5 +97,5 @@ export function useDebugger(): UseDebuggerReturn {
 
   const status: DebugStatus = state?.status ?? 'idle'
 
-  return { state, connected, status, send }
+  return { state, connected, status, send, propertyData }
 }

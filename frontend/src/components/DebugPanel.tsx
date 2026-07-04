@@ -1,8 +1,10 @@
-import type { DebugState } from '../types'
+import { useCallback, useState } from 'react'
+import type { DebugState, DebugVariable } from '../types'
 
 interface DebugPanelProps {
   state: DebugState | null
-  onSend: (cmd: string) => void
+  onSend: (cmd: string, args?: Record<string, string>) => void
+  propertyData: Record<string, DebugVariable[]>
 }
 
 function StackTrace({ frames }: { frames: DebugState['stack'] }) {
@@ -24,7 +26,86 @@ function StackTrace({ frames }: { frames: DebugState['stack'] }) {
   )
 }
 
-function VariableList({ name, variables }: { name: string; variables: DebugState['locals'] }) {
+interface VariableRowProps {
+  variable: DebugVariable
+  level: number
+  expanded: Set<string>
+  onToggle: (fullName: string) => void
+  children?: DebugVariable[]
+}
+
+function VariableRow({ variable, level, expanded, onToggle, children: childVars }: VariableRowProps) {
+  const key = variable.fullName ?? variable.name
+  const hasChildren = variable.numChildren > 0
+  const isExpanded = expanded.has(key)
+
+  return (
+    <div className="debug-variable">
+      <span
+        className="debug-var-indent"
+        style={{ paddingLeft: `${level * 16}px` }}
+      />
+
+      {hasChildren && (
+        <span className="debug-var-toggle" onClick={() => onToggle(key)}>
+          {isExpanded ? '▼' : '▶'}
+        </span>
+      )}
+
+      {!hasChildren && (
+        <span className="debug-var-toggle-spacer" />
+      )}
+
+      <span className="debug-var-value">{variable.value}</span>
+      <span className="debug-var-sep"> </span>
+      <span className="debug-var-type">{variable.type}</span>
+      <span className="debug-var-name">{variable.name}</span>
+
+      {hasChildren && isExpanded && childVars && childVars.length > 0 && (
+        <div className="debug-variable-children">
+          {childVars.map((child) => (
+            <VariableRow
+              key={child.fullName ?? child.name}
+              variable={child}
+              level={level + 1}
+              expanded={expanded}
+              onToggle={onToggle}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+interface VariableListProps {
+  name: string
+  variables: DebugVariable[]
+  propertyData: Record<string, DebugVariable[]>
+  onExpand: (fullName: string) => void
+}
+
+function VariableList({ name, variables, propertyData, onExpand }: VariableListProps) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  const handleToggle = useCallback(
+    (fullName: string) => {
+      setExpanded((prev) => {
+        const next = new Set(prev)
+
+        if (next.has(fullName)) {
+          next.delete(fullName)
+        } else {
+          next.add(fullName)
+          onExpand(fullName)
+        }
+
+        return next
+      })
+    },
+    [onExpand],
+  )
+
   if (variables.length === 0) {
     return null
   }
@@ -32,19 +113,22 @@ function VariableList({ name, variables }: { name: string; variables: DebugState
   return (
     <div className="debug-variables">
       <div className="debug-variables-title">{name}</div>
+
       {variables.map((v) => (
-        <div key={v.name} className="debug-variable">
-          <span className="debug-var-name">{v.name}</span>
-          <span className="debug-var-sep"> = </span>
-          <span className="debug-var-value">{v.value}</span>
-          <span className="debug-var-type">{v.type}</span>
-        </div>
+        <VariableRow
+          key={v.fullName ?? v.name}
+          variable={v}
+          level={0}
+          expanded={expanded}
+          onToggle={handleToggle}
+          children={propertyData[v.fullName ?? v.name]}
+        />
       ))}
     </div>
   )
 }
 
-export function DebugPanel({ state, onSend }: DebugPanelProps) {
+export function DebugPanel({ state, onSend, propertyData }: DebugPanelProps) {
   if (!state) {
     return (
       <div className="debug-panel">
@@ -57,6 +141,13 @@ export function DebugPanel({ state, onSend }: DebugPanelProps) {
   const locals = state.locals ?? []
   const globals = state.globals ?? []
   const isBreak = state.status === 'break'
+
+  const handleExpand = useCallback(
+    (fullName: string) => {
+      onSend('property_get', { name: fullName })
+    },
+    [onSend],
+  )
 
   return (
     <div className="debug-panel">
@@ -100,8 +191,24 @@ export function DebugPanel({ state, onSend }: DebugPanelProps) {
 
       <div className="debug-info">
         <StackTrace frames={stack} />
-        {locals.length > 0 && <VariableList name="Locals" variables={locals} />}
-        {globals.length > 0 && <VariableList name="Globals" variables={globals} />}
+
+        {locals.length > 0 && (
+          <VariableList
+            name="Locals"
+            variables={locals}
+            propertyData={propertyData}
+            onExpand={handleExpand}
+          />
+        )}
+
+        {globals.length > 0 && (
+          <VariableList
+            name="Globals"
+            variables={globals}
+            propertyData={propertyData}
+            onExpand={handleExpand}
+          />
+        )}
       </div>
     </div>
   )

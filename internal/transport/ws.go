@@ -57,15 +57,28 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	stateCh := h.subscribeToSessions(ctx)
+	propCh := make(chan OutgoingMessage, maxMsgBuf)
+
+	// send current state immediately so reconnecting clients don't start blank
+	if sess := h.store.Active(); sess != nil {
+		if st := sess.CurrentState(); st != nil {
+			msg := OutgoingMessage{
+				Type:   "state",
+				Data:   st,
+				Source: sess.ID(),
+			}
+			h.writeJSON(ctx, conn, msg)
+		}
+	}
 
 	done := make(chan struct{})
 
-	go h.readLoop(ctx, conn, done)
+	go h.readLoop(ctx, conn, done, propCh)
 
-	h.writeLoop(ctx, conn, done, stateCh)
+	h.writeLoop(ctx, conn, done, stateCh, propCh)
 }
 
-func (h *Handler) writeLoop(ctx context.Context, conn *websocket.Conn, done chan struct{}, stateCh chan OutgoingMessage) {
+func (h *Handler) writeLoop(ctx context.Context, conn *websocket.Conn, done chan struct{}, stateCh chan OutgoingMessage, propCh chan OutgoingMessage) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -79,23 +92,33 @@ func (h *Handler) writeLoop(ctx context.Context, conn *websocket.Conn, done chan
 				return
 			}
 
-			data, err := json.Marshal(msg)
-			if err != nil {
-				h.logger.WarnContext(ctx, "marshal", "error", err)
+			h.writeJSON(ctx, conn, msg)
 
+		case msg, ok := <-propCh:
+			if !ok {
 				return
 			}
 
-			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
-				h.logger.WarnContext(ctx, "write", "error", err)
-
-				return
-			}
+			h.writeJSON(ctx, conn, msg)
 		}
 	}
 }
 
-func (h *Handler) readLoop(_ context.Context, conn *websocket.Conn, done chan struct{}) {
+func (h *Handler) writeJSON(ctx context.Context, conn *websocket.Conn, msg OutgoingMessage) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.WarnContext(ctx, "marshal", "error", err)
+
+		return
+	}
+
+	if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		h.logger.WarnContext(ctx, "write", "error", err)
+	}
+}
+
+//nolint:cyclop
+func (h *Handler) readLoop(ctx context.Context, conn *websocket.Conn, done chan struct{}, propCh chan OutgoingMessage) {
 	defer close(done)
 
 	for {
@@ -109,13 +132,19 @@ func (h *Handler) readLoop(_ context.Context, conn *websocket.Conn, done chan st
 			continue
 		}
 
+		if plugins.CommandType(cmd.Type) == plugins.CmdPropertyGet {
+			h.handlePropertyGetRequest(ctx, cmd, propCh)
+
+			continue
+		}
+
 		pluginCmd, err := toPluginCommand(cmd)
 		if err != nil {
 			continue
 		}
 
-		if cmd.Type == "breakpoint_set" || cmd.Type == "breakpoint_remove" {
-			if cmd.Type == "breakpoint_set" {
+		if pluginCmd.Type == plugins.CmdBreakpointSet || pluginCmd.Type == plugins.CmdBreakpointRemove {
+			if pluginCmd.Type == plugins.CmdBreakpointSet {
 				h.store.SaveBreakpoint(cmd.Args["file"], cmd.Args["line"])
 			} else {
 				h.store.DeleteBreakpoint(cmd.Args["file"], cmd.Args["line"])
@@ -132,6 +161,46 @@ func (h *Handler) readLoop(_ context.Context, conn *websocket.Conn, done chan st
 
 			sess.SendCommand(pluginCmd)
 		}
+	}
+}
+
+func (h *Handler) handlePropertyGetRequest(ctx context.Context, cmd IncomingCommand, propCh chan OutgoingMessage) {
+	reply := make(chan any, 1)
+
+	pluginCmd := plugins.Command{
+		Type:  plugins.CmdPropertyGet,
+		Args:  cmd.Args,
+		Reply: reply,
+	}
+
+	sess := h.store.Active()
+	if sess == nil {
+		return
+	}
+
+	sess.SendCommand(pluginCmd)
+
+	select {
+	case result := <-reply:
+		vars, ok := result.([]plugins.Variable)
+		if !ok {
+			return
+		}
+
+		msg := OutgoingMessage{
+			Type: "property_get_result",
+			Data: map[string]any{
+				"name":     cmd.Args["name"],
+				"children": vars,
+			},
+		}
+
+		select {
+		case propCh <- msg:
+		default:
+		}
+
+	case <-ctx.Done():
 	}
 }
 

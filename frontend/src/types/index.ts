@@ -32,6 +32,7 @@ export interface Breakpoint {
 
 export interface DebugVariable {
   name: string
+  fullName?: string
   value: string
   type: string
   className?: string
@@ -54,7 +55,8 @@ export interface DebugState {
 
 export interface OutgoingMessage {
   type: string
-  data?: DebugState
+  data?: any
+  source?: string
 }
 
 export interface IncomingCommand {

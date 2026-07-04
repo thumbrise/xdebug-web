@@ -12,6 +12,7 @@ const (
 	CmdStop             CommandType = "stop"
 	CmdBreakpointSet    CommandType = "breakpoint_set"
 	CmdBreakpointRemove CommandType = "breakpoint_remove"
+	CmdPropertyGet      CommandType = "property_get"
 )
 
 type Command struct {
@@ -39,6 +40,7 @@ type Frame struct {
 
 type Variable struct {
 	Name        string     `json:"name"`
+	FullName    string     `json:"fullName,omitempty"`
 	Type        string     `json:"type"`
 	Value       string     `json:"value"`
 	ClassName   string     `json:"className,omitempty"`

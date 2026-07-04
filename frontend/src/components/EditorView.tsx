@@ -1,7 +1,7 @@
 import { useRef, useEffect, useCallback } from 'react'
-import Editor, { type OnMount } from '@monaco-editor/react'
-import type { editor } from 'monaco-editor'
-import type { Breakpoint } from '../types'
+import Editor, { useMonaco, type OnMount } from '@monaco-editor/react'
+import type { editor, IDisposable } from 'monaco-editor'
+import type { Breakpoint, DebugVariable, DebugState } from '../types'
 import { detectLanguage } from '../utils/language'
 
 interface EditorViewProps {
@@ -12,17 +12,22 @@ interface EditorViewProps {
   currentLine: number | null
   breakpoints: Breakpoint[]
   onToggleBreakpoint: (file: string, line: number) => void
+  variables?: DebugVariable[]
+  debugState: DebugState | null
 }
 
-export function EditorView({ path, content, loading, error, currentLine, breakpoints, onToggleBreakpoint }: EditorViewProps) {
+export function EditorView({ path, content, loading, error, currentLine, breakpoints, onToggleBreakpoint, variables, debugState }: EditorViewProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null)
   const bpDeco = useRef<string[]>([])
   const clDeco = useRef<string[]>([])
   const pathRef = useRef(path)
   const onToggleRef = useRef(onToggleBreakpoint)
+  const variablesRef = useRef(variables)
+  const monaco = useMonaco()
 
   pathRef.current = path
   onToggleRef.current = onToggleBreakpoint
+  variablesRef.current = variables
 
   const toggle = useCallback((line: number) => {
     if (!pathRef.current) return
@@ -65,7 +70,7 @@ export function EditorView({ path, content, loading, error, currentLine, breakpo
 
     if (!ed) return
 
-    if (currentLine === null) {
+    if (currentLine === null || currentLine <= 0) {
       clDeco.current = ed.deltaDecorations(clDeco.current, [])
       return
     }
@@ -87,6 +92,8 @@ export function EditorView({ path, content, loading, error, currentLine, breakpo
     clDeco.current = ed.deltaDecorations(clDeco.current, [decoration])
   }, [currentLine])
 
+  const hoverDisposable = useRef<IDisposable | null>(null)
+
   const handleMount: OnMount = (editor) => {
     editorRef.current = editor
 
@@ -98,6 +105,32 @@ export function EditorView({ path, content, loading, error, currentLine, breakpo
       if (line) toggle(line)
     })
 
+    if (monaco) {
+      hoverDisposable.current = monaco.languages.registerHoverProvider('php', {
+        provideHover(model, position) {
+          const vars = variablesRef.current
+          if (!vars || vars.length === 0) return null
+
+          const word = model.getWordAtPosition(position)
+          if (!word) return null
+
+          const varName = word.word
+
+          for (const v of vars) {
+            if (v.name === varName || v.name === '$' + varName || v.name === varName.replace('$', '')) {
+              return {
+                contents: [
+                  { value: `**${v.name}** = ${v.value} : ${v.type}${v.className ? ' (' + v.className + ')' : ''}` },
+                ],
+              }
+            }
+          }
+
+          return null
+        },
+      })
+    }
+
     syncBreakpoints()
     syncCurrentLine()
   }
@@ -107,20 +140,24 @@ export function EditorView({ path, content, loading, error, currentLine, breakpo
   }, [syncBreakpoints])
 
   useEffect(() => {
-    const ed = editorRef.current
+    return () => {
+      bpDeco.current = []
+      clDeco.current = []
 
-    if (!ed) return
-
-    syncCurrentLine()
-
-    if (currentLine !== null) {
-      ed.revealLineInCenter(currentLine)
-      ed.setPosition({ lineNumber: currentLine, column: 1 })
-      ed.focus()
+      if (hoverDisposable.current) {
+        hoverDisposable.current.dispose()
+        hoverDisposable.current = null
+      }
     }
-  }, [currentLine, syncCurrentLine])
+  }, [])
 
-  const language = path ? detectLanguage(path) : 'plaintext'
+  useEffect(() => {
+    if (!path) {
+      bpDeco.current = []
+      clDeco.current = []
+      return
+    }
+  }, [path])
 
   if (!path) {
     return (
@@ -146,6 +183,8 @@ export function EditorView({ path, content, loading, error, currentLine, breakpo
     )
   }
 
+  const language = path ? detectLanguage(path) : 'plaintext'
+
   return (
     <div className="editor-view">
       <div className="editor-header">{path}</div>
@@ -166,7 +205,7 @@ export function EditorView({ path, content, loading, error, currentLine, breakpo
           wordWrap: 'on',
           tabSize: 4,
           renderWhitespace: 'selection',
-          glyphMargin: true,
+          glyphMargin: !!debugState,
           folding: true,
           lineDecorationsWidth: 8,
           lineNumbersMinChars: 3,
@@ -177,6 +216,7 @@ export function EditorView({ path, content, loading, error, currentLine, breakpo
             verticalScrollbarSize: 10,
             horizontalScrollbarSize: 10,
           },
+          codeLens: false,
         }}
       />
     </div>

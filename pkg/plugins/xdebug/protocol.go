@@ -114,6 +114,7 @@ type contextGetResponse struct {
 
 type contextProperty struct {
 	Name        string `xml:"name,attr"`
+	FullName    string `xml:"fullname,attr"`
 	Type        string `xml:"type,attr"`
 	Encoding    string `xml:"encoding,attr"`
 	ClassName   string `xml:"classname,attr"`
@@ -132,7 +133,7 @@ func parseContextGetResponse(data []byte) ([]plugins.Variable, error) {
 	vars := make([]plugins.Variable, 0, len(resp.Properties))
 
 	for _, p := range resp.Properties {
-		v := plugins.Variable{Name: p.Name, Type: p.Type}
+		v := plugins.Variable{Name: p.Name, FullName: p.FullName, Type: p.Type}
 		v.Value = decodeValue(p.Value, p.Encoding, p.Type)
 
 		if p.NumChildren > 0 {
@@ -162,7 +163,7 @@ func parsePropertyGetResponse(data []byte) ([]plugins.Variable, error) {
 	vars := make([]plugins.Variable, 0, len(resp.Properties))
 
 	for _, p := range resp.Properties {
-		v := plugins.Variable{Name: p.Name, Type: p.Type}
+		v := plugins.Variable{Name: p.Name, FullName: p.FullName, Type: p.Type}
 		v.Value = decodeValue(p.Value, p.Encoding, p.Type)
 
 		if p.NumChildren > 0 {
@@ -202,25 +203,6 @@ func parseStackGetResponse(data []byte) ([]plugins.Frame, error) {
 	}
 
 	return frames, nil
-}
-
-func formatCommand(cmd string, txID int, args map[string]string) string {
-	var b strings.Builder
-
-	b.WriteString(cmd)
-	b.WriteString(" -i ")
-	fmt.Fprintf(&b, "%d", txID)
-
-	for k, v := range args {
-		b.WriteString(" -")
-		b.WriteString(k)
-		b.WriteString(" ")
-		b.WriteString(url.QueryEscape(v))
-	}
-
-	b.WriteByte(0)
-
-	return b.String()
 }
 
 func formatBreakpointSetCmd(txID int, fileURI string, line int) string {
